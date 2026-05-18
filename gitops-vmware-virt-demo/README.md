@@ -50,7 +50,7 @@ Rollback: git revert Commit 2 → ArgoCD restores instantly
 gitops-vmware-virt-demo/
 ├── README.md
 ├── argocd/
-│   └── application.yaml         # ArgoCD Application (prune: true, selfHeal: true)
+│   ├── application.yaml         # ArgoCD Application (prune: true, selfHeal: true)
 │   └── rbac.yaml                # ArgoCD controller permissions in vm-demo
 ├── base/                        # ArgoCD sync target
 │   ├── vm-blue.yaml             # VirtualMachine — runStrategy: Always
