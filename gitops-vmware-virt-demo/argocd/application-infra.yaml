@@ -1,20 +1,23 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: vm-demo
+  name: vm-demo-infra
   namespace: openshift-gitops
 spec:
   project: vm-demo
   source:
     repoURL: https://github.com/cldmnky/rh-demos
     targetRevision: main
-    path: gitops-vmware-virt-demo/base
+    path: gitops-vmware-virt-demo/pipelines
+    directory:
+      exclude: '{install-pipelinerun.yaml,ansible-configmaps.yaml}'
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: vm-demo
   syncPolicy:
     automated:
-      prune: true      # removes resources deleted from Git
-      selfHeal: true   # reverts out-of-band cluster changes
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true

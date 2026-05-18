@@ -6,7 +6,8 @@ metadata:
 spec:
   params:
     - name: git-repo-url
-      description: "HTTPS URL of the demo Git repository"
+      description: "SSH URL of the demo Git repository"
+      default: "git@github.com:cldmnky/rh-demos.git"
     - name: lb-ip-url
       description: "URL of the MetalLB LoadBalancer (http://<LB_IP>)"
     - name: run-id
@@ -62,6 +63,9 @@ spec:
           value: "[upgrade-pipeline] start green VM for upgrade run $(params.run-id)"
         - name: git-repo-url
           value: $(params.git-repo-url)
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key
 
     # [3] Wait for green VMI to reach Running phase
     - name: wait-for-green
@@ -146,6 +150,9 @@ spec:
           value: "[upgrade-pipeline] cutover to green — smoke test passed (run $(params.run-id))"
         - name: git-repo-url
           value: $(params.git-repo-url)
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key
 
   # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
   finally:
@@ -166,3 +173,6 @@ spec:
           value: "[upgrade-pipeline] smoke test failed — halting green (run $(params.run-id))"
         - name: git-repo-url
           value: $(params.git-repo-url)
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key

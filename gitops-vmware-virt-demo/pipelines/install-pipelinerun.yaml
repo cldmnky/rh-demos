@@ -7,8 +7,6 @@ spec:
   pipelineRef:
     name: install-app
   params:
-    - name: git-repo-url
-      value: http://gitea-http.gitea.svc/demo-org/vm-demo.git  # update to your repo URL
     - name: lb-ip-url
       value: http://192.168.10.50  # update to your MetalLB IP
   workspaces:

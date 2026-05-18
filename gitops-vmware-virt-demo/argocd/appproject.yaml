@@ -1,0 +1,16 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: vm-demo
+  namespace: openshift-gitops
+spec:
+  sourceNamespaces:
+    - vm-demo
+  destinations:
+    - namespace: vm-demo
+      server: https://kubernetes.default.svc
+  sourceRepos:
+    - 'https://github.com/cldmnky/rh-demos'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'

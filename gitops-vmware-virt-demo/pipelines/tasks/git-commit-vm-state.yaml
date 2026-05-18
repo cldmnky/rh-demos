@@ -12,30 +12,25 @@ spec:
     - name: commit-message
       description: "Git commit message"
     - name: git-repo-url
-      description: "HTTPS URL of the Git repository"
+      description: "SSH URL of the Git repository"
+      default: "git@github.com:cldmnky/rh-demos.git"
+  workspaces:
+    - name: ssh-key
+      description: "SSH deploy key (key: id_rsa)"
   steps:
     - name: clone-modify-push
       image: alpine:3.20
-      env:
-        - name: GIT_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: gitea-token
-              key: username
-        - name: GIT_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: gitea-token
-              key: token
       script: |
         #!/bin/sh
         set -eu
-        apk add --no-cache git yq
+        apk add --no-cache git yq openssh-client
 
-        AUTH_URL="$(params.git-repo-url)"
-        AUTH_URL="$(echo "$AUTH_URL" | sed "s#^http://#http://$GIT_USERNAME:$GIT_TOKEN@#; s#^https://#https://$GIT_USERNAME:$GIT_TOKEN@#")"
+        mkdir -p ~/.ssh && chmod 700 ~/.ssh
+        cp /workspace/ssh-key/id_rsa ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no"
 
-        git clone "$AUTH_URL" /workspace/repo
+        git clone "$(params.git-repo-url)" /workspace/repo
         cd /workspace/repo
 
         yq e '.spec.runStrategy = "$(params.run-strategy)"' \

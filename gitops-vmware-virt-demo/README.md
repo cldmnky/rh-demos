@@ -147,50 +147,45 @@ oc apply -f metallb/ipaddresspool.yaml
 oc apply -f metallb/l2advertisement.yaml
 ```
 
-### 2 — SSH Key
+### 2 — Deploy Key and Cluster Secrets
 
-```bash
-ssh-keygen -t ed25519 -f /tmp/demo-key -N ""
+The pipelines use the deploy key **`~/.ssh/rh-demos`** for both:
+- SSH git push-back from Tekton tasks (GitHub deploy key)
+- VM SSH access via Ansible (public key injected through cloud-init)
 
-# Private key for Tekton tasks
-oc create secret generic vm-ssh-key \
-  --from-file=id_rsa=/tmp/demo-key \
-  -n vm-demo
+**Add the public key as a GitHub deploy key (write access):**
 
-# Public key injected via cloud-init
-oc create secret generic vm-cloud-init \
-  --from-literal=userData="#cloud-config
-user: cloud-user
-password: redhat
-chpasswd: {expire: False}
-ssh_authorized_keys:
-  - $(cat /tmp/demo-key.pub)" \
-  -n vm-demo
+```
+https://github.com/cldmnky/rh-demos/settings/keys
 ```
 
-### 3 — Gitea Token (for pipeline Git writes)
+Paste the contents of `~/.ssh/rh-demos.pub` and enable **"Allow write access"**.
+
+**Create the cluster secrets with the setup script:**
 
 ```bash
-# Create a token in Gitea UI → User Settings → Applications
-oc create secret generic gitea-token \
-  --from-literal=token=<your-gitea-token> \
-  --from-literal=username=demo \
-  -n vm-demo
+cd gitops-vmware-virt-demo
+./scripts/setup-secrets.sh          # targets vm-demo namespace by default
+# Override with: NAMESPACE=other-ns ./scripts/setup-secrets.sh
 ```
 
-### 4 — Push this repo to Gitea
+This creates:
+- `vm-ssh-key` — private key (`~/.ssh/rh-demos`) used by Tekton for git SSH auth
+- `vm-cloud-init` — cloud-init userdata with the public key in `authorized_keys`
+
+### 3 — ArgoCD repo access
+
+This demo uses `https://github.com/cldmnky/rh-demos` as the ArgoCD source. For a private fork, add a repository credential in the ArgoCD UI or via secret and update `argocd/appproject.yaml` `sourceRepos`.
+
+### 4 — ArgoCD Applications
 
 ```bash
-git remote add gitea http://<gitea-route>/demo-org/vm-demo.git
-git push gitea main
-```
-
-Update the `repoURL` in `argocd/application.yaml` and the `git-repo-url` params in `pipelines/install-pipelinerun.yaml` and `pipelines/event-listener.yaml` to match.
-
-### 5 — ArgoCD Application
-
-```bash
+# App 1: VMs and services (what ArgoCD drives during the demo)
+oc apply -f argocd/appproject.yaml
 oc apply -f argocd/application.yaml
+
+# App 2: Pipeline infrastructure (tasks, pipelines, event-listener)
+oc apply -f argocd/application-infra.yaml
 ```
 
 ArgoCD syncs `base/` to the `vm-demo` namespace. Within ~30 seconds:
@@ -198,23 +193,19 @@ ArgoCD syncs `base/` to the `vm-demo` namespace. Within ~30 seconds:
 - `demo-vm-green` is `Stopped`
 - `demo-app-lb` has an external IP
 
-### 6 — Tekton Resources
+### 6 — Trigger the Install Pipeline
 
 ```bash
-# Tasks (includes ansible-run-playbook, which accepts playbook content inline as a param)
-oc apply -f pipelines/tasks/
-
-# Pipelines
-oc apply -f pipelines/install-pipeline.yaml
-oc apply -f pipelines/upgrade-pipeline.yaml
-
-# EventListener + Route (for webhook-triggered upgrades)
-oc apply -f pipelines/event-listener.yaml
+oc create -f pipelines/install-pipelinerun.yaml -n vm-demo
 ```
 
-Configure a Gitea webhook: `http://<upgrade-trigger-route>/` → push events.
+> **Note:** `install-pipelinerun.yaml` and `ansible-configmaps.yaml` are intentionally excluded from the ArgoCD infra app — PipelineRuns are one-shot triggers, not desired state.
 
-> The `wait-for-vmi-status` task is fetched from [ArtifactHub](https://artifacthub.io/packages/tekton-task/kubevirt-tekton-tasks/wait-for-vmi-status) at pipeline run time via the hub resolver — no manual installation needed.
+Configure a GitHub webhook pointing to the `upgrade-trigger` Route for webhook-driven upgrades:
+
+```bash
+oc get route upgrade-trigger -n vm-demo
+```
 
 ---
 
@@ -224,7 +215,7 @@ Configure a Gitea webhook: `http://<upgrade-trigger-route>/` → push events.
 
 **Talking point:** *"In VMware, creating a VM means clicking through vCenter wizards and it lives only in vCenter. Here, every VM is a YAML file in Git — including the standby VM we'll use for upgrades later."*
 
-1. Open the Gitea repo. Show `base/vm-blue.yaml` (`runStrategy: Always`), `base/vm-green.yaml` (`runStrategy: Halted`), and `base/service-lb.yaml`.
+1. Open the GitHub repo. Show `base/vm-blue.yaml` (`runStrategy: Always`), `base/vm-green.yaml` (`runStrategy: Halted`), and `base/service-lb.yaml`.
 2. Open the ArgoCD console. Show the `vm-demo` Application synced, with both VMs and the LB service in the resource tree.
 3. Show the VM states and MetalLB IP:
 
@@ -284,7 +275,7 @@ FAIL → [6] git-stop-green → Commit: vm-green → Halted (blue unchanged)
 # Edit app-version.yaml: version: "v2.0"
 git add pipelines/app-version.yaml
 git commit -m "bump app version to v2.0"
-git push gitea main
+git push origin main
 ```
 
 **Watch in real time:**
@@ -318,7 +309,7 @@ oc get vm -n vm-demo
 yq e '.spec.runStrategy = "Always"' -i base/vm-blue.yaml
 git add base/vm-blue.yaml
 git commit -m "rollback: start blue standby"
-git push gitea main
+git push origin main
 
 # Wait until blue is Running, smoke-test it...
 
@@ -327,7 +318,7 @@ git revert <cutover-commit-sha> --no-commit
 yq e '.spec.runStrategy = "Halted"' -i base/vm-green.yaml
 git add base/
 git commit -m "rollback: route traffic back to blue"
-git push gitea main
+git push origin main
 
 curl http://$LB_IP/
 # <h1>Demo App v1.0 — served by demo-vm-blue</h1>
@@ -374,7 +365,7 @@ LB_IP=$(oc get svc demo-app-lb -n vm-demo -o jsonpath='{.status.loadBalancer.ing
 curl http://$LB_IP/
 
 # 9. Secrets present
-oc get secret vm-ssh-key vm-cloud-init gitea-token -n vm-demo
+oc get secret vm-ssh-key vm-cloud-init -n vm-demo
 
 # 10. SSH services present
 oc get svc demo-vm-blue-ssh demo-vm-green-ssh -n vm-demo
@@ -389,7 +380,7 @@ oc get pipeline install-app upgrade-app -n vm-demo
 yq e '.spec.runStrategy = "Always"' -i base/vm-blue.yaml
 yq e '.spec.runStrategy = "Halted"' -i base/vm-green.yaml
 yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i base/service-lb.yaml
-git add base/ && git commit -m "reset demo state" && git push gitea main
+git add base/ && git commit -m "reset demo state" && git push origin main
 # ArgoCD syncs → cluster matches initial state in ~30 seconds
 ```
 

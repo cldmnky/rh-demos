@@ -1,5 +1,4 @@
----
-# EventListener — receives Gitea webhook and triggers the upgrade pipeline
+# EventListener — receives GitHub webhook and triggers the upgrade pipeline
 # when pipelines/app-version.yaml is updated on the main branch.
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
@@ -9,7 +8,7 @@ metadata:
 spec:
   serviceAccountName: pipeline
   triggers:
-    - name: gitea-push-trigger
+    - name: github-push-trigger
       interceptors:
         - ref:
             name: cel

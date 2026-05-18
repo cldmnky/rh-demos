@@ -5,8 +5,6 @@ metadata:
   namespace: vm-demo
 spec:
   params:
-    - name: git-repo-url
-      description: "HTTPS URL of the demo Git repository"
     - name: vm-name
       description: "Name of the VirtualMachine to install onto"
       default: demo-vm-blue
