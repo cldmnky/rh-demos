@@ -19,10 +19,10 @@ spec:
             requests:
               storage: 30Gi
           storageClassName: ocs-storagecluster-ceph-rbd-virtualization
-        sourceRef:
-          kind: DataSource
-          name: rhel9
-          namespace: openshift-virtualization-os-images
+        source:
+          snapshot:
+            name: rhel9-ab4ec16077fe
+            namespace: openshift-virtualization-os-images
   template:
     metadata:
       labels:
