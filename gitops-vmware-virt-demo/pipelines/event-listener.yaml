@@ -1,5 +1,5 @@
 # EventListener — receives GitHub webhook and triggers the upgrade pipeline
-# when pipelines/app-version.yaml is updated on the main branch.
+# when gitops-vmware-virt-demo/pipelines/app-version.yaml is updated on main.
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
@@ -16,8 +16,9 @@ spec:
             - name: filter
               value: >
                 body.ref == 'refs/heads/main' &&
-                body.commits.exists(c, c.modified.exists(f, f == 'pipelines/app-version.yaml') ||
-                                       c.added.exists(f, f == 'pipelines/app-version.yaml'))
+                body.commits.exists(c,
+                  c.modified.exists(f, f == 'gitops-vmware-virt-demo/pipelines/app-version.yaml') ||
+                  c.added.exists(f, f == 'gitops-vmware-virt-demo/pipelines/app-version.yaml'))
       bindings:
         - ref: upgrade-binding
       template:
@@ -31,7 +32,7 @@ metadata:
 spec:
   params:
     - name: git-repo-url
-      value: $(body.repository.clone_url)
+      value: $(body.repository.ssh_url)
 ---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerTemplate
@@ -54,7 +55,7 @@ spec:
           - name: git-repo-url
             value: $(tt.params.git-repo-url)
           - name: lb-ip-url
-            value: http://192.168.10.50  # update to your MetalLB IP
+            value: http://demo-app-lb.vm-demo.svc.cluster.local
           - name: run-id
             value: $(uid)
         workspaces:
@@ -62,7 +63,7 @@ spec:
             secret:
               secretName: vm-ssh-key
 ---
-# Route to expose the EventListener so Gitea can reach it
+# Route to expose the EventListener so GitHub can reach it
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

@@ -4,7 +4,8 @@
 # Starts from a clean cluster (ArgoCD + Virtualization + Pipelines installed, nothing else).
 # Walks through: secrets → MetalLB → ArgoCD setup → VM creation → app install → blue/green upgrade → rollback
 #
-# Run from repo root:
+# Run from repo root or gitops-vmware-virt-demo/:
+#   ./gitops-vmware-virt-demo/demo/demo.sh
 #   cd gitops-vmware-virt-demo && ./demo/demo.sh
 #
 # Flags:
@@ -12,20 +13,23 @@
 #   -d  Debug — disable simulated typing
 #   -w  Auto-advance after N seconds
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
+DEMO_DIR="gitops-vmware-virt-demo"
+
 ########################
 # include the magic
 ########################
-. ../../scripts/demo-magic.sh
+. "${REPO_ROOT}/scripts/demo-magic.sh"
+cd "${REPO_ROOT}"
 
 ########################
 # config
 ########################
-TYPE_SPEED=40
+[[ -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
-REPO_ROOT=$(git rev-parse --show-toplevel)
-DEMO_DIR="gitops-vmware-virt-demo"
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
@@ -130,10 +134,10 @@ Here: a YAML file with an IP range. Applied once. Works immediately." 226
 wait
 clear
 
-pe "cat metallb/ipaddresspool.yaml"
+pe "cat ${DEMO_DIR}/metallb/ipaddresspool.yaml"
 wait
-pe "oc apply -f metallb/ipaddresspool.yaml"
-pe "oc apply -f metallb/l2advertisement.yaml"
+pe "oc apply -f ${DEMO_DIR}/metallb/ipaddresspool.yaml"
+pe "oc apply -f ${DEMO_DIR}/metallb/l2advertisement.yaml"
 wait
 clear
 
@@ -158,24 +162,24 @@ pe "oc patch argocd openshift-gitops -n ${ARGOCD_NS} \
 wait
 
 comment "Create the AppProject — scopes this demo to our GitHub repo and the vm-demo namespace."
-pe "cat argocd/appproject.yaml"
+pe "cat ${DEMO_DIR}/argocd/appproject.yaml"
 wait
-pe "oc apply -f argocd/appproject.yaml"
+pe "oc apply -f ${DEMO_DIR}/argocd/appproject.yaml"
 wait
 clear
 
 comment "Application 1: VMs and services — ArgoCD syncs gitops-vmware-virt-demo/base/ to the cluster."
 comment "This Application lives in the vm-demo namespace — not in openshift-gitops."
-pe "cat argocd/application.yaml"
+pe "cat ${DEMO_DIR}/argocd/application.yaml"
 wait
-pe "oc apply -f argocd/application.yaml -n ${NAMESPACE}"
+pe "oc apply -f ${DEMO_DIR}/argocd/application.yaml -n ${NAMESPACE}"
 wait
 clear
 
 comment "Application 2: Pipeline infrastructure — Tekton tasks, pipelines, event-listener."
-pe "cat argocd/application-infra.yaml"
+pe "cat ${DEMO_DIR}/argocd/application-infra.yaml"
 wait
-pe "oc apply -f argocd/application-infra.yaml -n ${NAMESPACE}"
+pe "oc apply -f ${DEMO_DIR}/argocd/application-infra.yaml -n ${NAMESPACE}"
 wait
 clear
 
@@ -217,8 +221,10 @@ wait
 comment "MetalLB has assigned a real external IP from our address pool."
 pe "oc get svc demo-app-lb -n ${NAMESPACE}"
 wait
-LB_IP=$(oc get svc demo-app-lb -n "${NAMESPACE}" \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "192.168.10.50")
+until LB_IP=$(oc get svc demo-app-lb -n "${NAMESPACE}" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) && [[ -n "${LB_IP}" ]]; do
+  sleep 5
+done
 
 say "The cluster now exactly matches Git.
 Blue running. Green halted at zero cost.

@@ -12,8 +12,10 @@ set -euo pipefail
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
 RESET_GIT="${RESET_GIT:-false}"
-REPO_ROOT=$(git rev-parse --show-toplevel)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 DEMO_DIR="gitops-vmware-virt-demo"
+DEMO_ROOT="${REPO_ROOT}/${DEMO_DIR}"
 
 echo "🧹 Cleaning up demo resources..."
 
@@ -33,7 +35,7 @@ oc patch argocd openshift-gitops -n "${ARGOCD_NS}" \
 
 # Delete MetalLB config
 echo "→ Removing MetalLB configuration..."
-oc delete -f metallb/ --ignore-not-found 2>/dev/null || true
+oc delete -f "${DEMO_ROOT}/metallb/" --ignore-not-found 2>/dev/null || true
 
 # Delete entire vm-demo namespace (removes VMs, pipelines, secrets, services, etc.)
 echo "→ Deleting namespace ${NAMESPACE} (VMs, pipelines, secrets, services)..."
@@ -49,8 +51,8 @@ if [[ "${RESET_GIT}" == "true" ]]; then
   echo "→ Resetting demo-modified Git files..."
 
   # Reset app-version.yaml back to v1.0
-  if grep -q '"v2.0"' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/dev/null; then
-    sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_DIR}/pipelines/app-version.yaml"
+  if grep -q '"v2.0"' "${DEMO_ROOT}/pipelines/app-version.yaml" 2>/dev/null; then
+    sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_ROOT}/pipelines/app-version.yaml"
     echo "   Reverted app-version.yaml to v1.0"
   fi
 
@@ -61,7 +63,7 @@ if [[ "${RESET_GIT}" == "true" ]]; then
 
   # Restore service selector to blue
   if command -v yq &>/dev/null; then
-    yq e '.spec.selector.version = "blue"' -i "${REPO_ROOT}/${DEMO_DIR}/base/service-lb.yaml" 2>/dev/null || true
+    yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i "${REPO_ROOT}/${DEMO_DIR}/base/service-lb.yaml" 2>/dev/null || true
   fi
 
   git -C "${REPO_ROOT}" add \

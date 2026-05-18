@@ -56,7 +56,8 @@ gitops-vmware-virt-demo/
 │   ├── vm-green.yaml            # VirtualMachine — runStrategy: Halted (standby)
 │   ├── service-lb.yaml          # MetalLB LoadBalancer (selector: demo-vm-blue)
 │   ├── service-blue-ssh.yaml    # ClusterIP for Ansible SSH to blue
-│   └── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
+│   ├── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
+│   └── service-green-http.yaml  # ClusterIP for pre-cutover HTTP smoke test
 ├── metallb/
 │   ├── ipaddresspool.yaml       # L2 address pool
 │   └── l2advertisement.yaml     # L2Advertisement
@@ -66,7 +67,7 @@ gitops-vmware-virt-demo/
 │   ├── install-pipelinerun.yaml # Manual PipelineRun trigger
 │   ├── app-version.yaml         # ConfigMap — bump version to trigger upgrade
 │   ├── ansible-configmaps.yaml  # Playbooks as ConfigMaps (reference only — not required)
-│   ├── event-listener.yaml      # Tekton EventListener + Gitea webhook trigger
+│   ├── event-listener.yaml      # Tekton EventListener + GitHub webhook trigger
 │   └── tasks/
 │       ├── git-commit-vm-state.yaml   # Patches runStrategy and commits to Git
 │       ├── git-commit-cutover.yaml    # Commits service selector + halts outgoing VM
@@ -182,10 +183,10 @@ This demo uses `https://github.com/cldmnky/rh-demos` as the ArgoCD source. For a
 ```bash
 # App 1: VMs and services (what ArgoCD drives during the demo)
 oc apply -f argocd/appproject.yaml
-oc apply -f argocd/application.yaml
+oc apply -f argocd/application.yaml -n vm-demo
 
 # App 2: Pipeline infrastructure (tasks, pipelines, event-listener)
-oc apply -f argocd/application-infra.yaml
+oc apply -f argocd/application-infra.yaml -n vm-demo
 ```
 
 ArgoCD syncs `base/` to the `vm-demo` namespace. Within ~30 seconds:
@@ -263,17 +264,17 @@ The upgrade pipeline flow:
 [2] git-start-green   → Commit: vm-green.yaml runStrategy: Always → ArgoCD starts green
 [3] wait-for-green    → Poll VMI until Running
 [4] ansible-upgrade   → Ansible installs v2.0 on green
-[5] smoke-test        → curl http://demo-vm-green-ssh/health
+[5] smoke-test        → curl http://demo-vm-green-http/health
 
 PASS → [6] git-cutover  → Commit: service selector → green, vm-blue → Halted
 FAIL → [6] git-stop-green → Commit: vm-green → Halted (blue unchanged)
 ```
 
-**Trigger the upgrade** by bumping the version in `pipelines/app-version.yaml` and pushing (Gitea webhook fires the EventListener), or manually:
+**Trigger the upgrade** by bumping the version in `gitops-vmware-virt-demo/pipelines/app-version.yaml` and pushing (GitHub webhook fires the EventListener), or manually:
 
 ```bash
-# Edit app-version.yaml: version: "v2.0"
-git add pipelines/app-version.yaml
+# Edit gitops-vmware-virt-demo/pipelines/app-version.yaml: version: "v2.0"
+git add gitops-vmware-virt-demo/pipelines/app-version.yaml
 git commit -m "bump app version to v2.0"
 git push origin main
 ```
@@ -367,8 +368,8 @@ curl http://$LB_IP/
 # 9. Secrets present
 oc get secret vm-ssh-key vm-cloud-init -n vm-demo
 
-# 10. SSH services present
-oc get svc demo-vm-blue-ssh demo-vm-green-ssh -n vm-demo
+# 10. SSH and pre-cutover HTTP services present
+oc get svc demo-vm-blue-ssh demo-vm-green-ssh demo-vm-green-http -n vm-demo
 
 # 11. Tekton pipelines present
 oc get pipeline install-app upgrade-app -n vm-demo
@@ -390,7 +391,7 @@ git add base/ && git commit -m "reset demo state" && git push origin main
 
 - Pre-run Acts 1 and 2 before the audience arrives; reset with the script above
 - Green VM starts from `Halted` in ~30–60 seconds (DataVolume is pre-provisioned)
-- Keep browser tabs open to: ArgoCD console, Tekton console, Gitea commit history, OCP Virtualization console, and a `curl` terminal
+- Keep browser tabs open to: ArgoCD console, Tekton console, GitHub commit history, OCP Virtualization console, and a `curl` terminal
 
 ---
 

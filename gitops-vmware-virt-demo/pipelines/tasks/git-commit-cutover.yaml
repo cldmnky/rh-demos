@@ -14,6 +14,9 @@ spec:
     - name: git-repo-url
       description: "SSH URL of the Git repository"
       default: "git@github.com:cldmnky/rh-demos.git"
+    - name: repo-subdir
+      description: "Path to this demo inside the Git repository"
+      default: "gitops-vmware-virt-demo"
   workspaces:
     - name: ssh-key
       description: "SSH deploy key (key: id_rsa)"
@@ -33,17 +36,19 @@ spec:
         git clone "$(params.git-repo-url)" /workspace/repo
         cd /workspace/repo
 
+        BASE_DIR="$(params.repo-subdir)/base"
+
         # Update service selector to active slot
         yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-$(params.active-slot)"' \
-          -i base/service-lb.yaml
+          -i "$BASE_DIR/service-lb.yaml"
 
         # Halt the outgoing VM
         yq e '.spec.runStrategy = "Halted"' \
-          -i base/$(params.halted-vm-file)
+          -i "$BASE_DIR/$(params.halted-vm-file)"
 
         git config user.email "tekton@openshift.local"
         git config user.name "Tekton Pipeline"
-        git add base/service-lb.yaml base/$(params.halted-vm-file)
+        git add "$BASE_DIR/service-lb.yaml" "$BASE_DIR/$(params.halted-vm-file)"
         git diff --cached --quiet && {
           echo "No Git changes needed"
           exit 0

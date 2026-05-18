@@ -1,4 +1,4 @@
-# Bump this value to trigger the upgrade pipeline via a Gitea webhook → EventListener
+# Bump this value to trigger the upgrade pipeline via a GitHub webhook → EventListener
 apiVersion: v1
 kind: ConfigMap
 metadata:
