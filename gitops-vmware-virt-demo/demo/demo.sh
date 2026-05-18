@@ -112,15 +112,18 @@ pe "oc create secret generic vm-ssh-key \
   --dry-run=client -o yaml | oc apply -f -"
 wait
 
-comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the VM's authorized_keys."
+comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the rhel user's authorized_keys."
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
 pe "oc create secret generic vm-cloud-init \
   --from-literal=userdata='#cloud-config
-user: cloud-user
-password: redhat
-chpasswd: { expire: False }
-ssh_authorized_keys:
-  - ${PUB_KEY}' \
+users:
+  - name: rhel
+    ssh_authorized_keys:
+      - ${PUB_KEY}
+chpasswd:
+  list: |
+    rhel:redhat
+  expire: false' \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
 wait
@@ -272,7 +275,7 @@ pe "oc get applications.argoproj.io vm-demo -n ${NAMESPACE} \
 wait
 
 comment "Tekton pipeline infrastructure — also managed by ArgoCD from Git."
-pe "tkn pipeline list -n ${NAMESPACE}"
+pe "oc get pipelines.tekton.dev -n ${NAMESPACE}"
 wait
 
 comment "Traffic is currently routed to blue via the MetalLB LoadBalancer."
@@ -299,7 +302,7 @@ wait
 clear
 
 comment "The install pipeline: wait for VM ready → Ansible installs nginx + v1.0 → smoke test."
-pe "tkn pipeline describe install-app -n ${NAMESPACE}"
+pe "oc get pipelines.tekton.dev install-app -n ${NAMESPACE}"
 wait
 
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
@@ -307,7 +310,8 @@ pe "oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE}"
 wait
 clear
 
-pe "tkn pipelinerun logs -f -n ${NAMESPACE} -L"
+comment "Watching the install-app pipeline logs stream in real-time. Every step is a Tekton Task."
+pe "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
 wait
 clear
 
@@ -359,7 +363,7 @@ comment "Watching VM state in the background while pipeline logs stream."
 pe "oc get vm -n ${NAMESPACE} -w &"
 WATCH_PID=$!
 sleep 3
-pe "tkn pipelinerun logs -f -n ${NAMESPACE} -L"
+pe "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix &"
 kill $WATCH_PID 2>/dev/null
 pei ""
 wait
