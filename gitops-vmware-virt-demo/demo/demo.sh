@@ -26,7 +26,7 @@ cd "${REPO_ROOT}"
 ########################
 # config
 ########################
-[[ -v TYPE_SPEED ]] && TYPE_SPEED=40
+[[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
@@ -60,11 +60,15 @@ function wait_for_argo_sync() {
       -o jsonpath='{.status.sync.status}' 2>/dev/null | grep -q "^Synced$"; do
     sleep 5
   done
+  # vm-demo is Suspended (green VM is Halted by design) — accept Healthy or Suspended
   until oc get application "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.health.status}' 2>/dev/null | grep -q "^Healthy$"; do
+      -o jsonpath='{.status.health.status}' 2>/dev/null | grep -qE "^(Healthy|Suspended)$"; do
     sleep 5
   done
-  echo "✅ ${app}: Synced / Healthy"
+  local health
+  health=$(oc get application "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.health.status}' 2>/dev/null)
+  echo "✅ ${app}: Synced / ${health}"
 }
 
 ##############################################################
@@ -408,11 +412,7 @@ pe "git -C ${REPO_ROOT} revert ${CUTOVER_SHA} --no-edit"
 pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} commit --amend --no-edit"
-pe "git -C ${REPO_ROOT} push origin main"
-wait
-clear
-
-pe "oc get vm -n ${NAMESPACE}"
+pe "git -C ${REPO_ROOT} push --force-with-lease origin main"
 wait
 pe "curl -s http://${LB_IP}/"
 wait
