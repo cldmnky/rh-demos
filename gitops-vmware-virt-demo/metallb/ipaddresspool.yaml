@@ -1,0 +1,8 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: demo-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.10.50-192.168.10.59  # adjust to your demo network segment

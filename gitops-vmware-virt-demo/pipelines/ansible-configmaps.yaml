@@ -1,0 +1,56 @@
+# These ConfigMaps are kept as reference only.
+# The ansible-run-playbook Task now accepts playbook content directly via the
+# `playbook-content` parameter, so these ConfigMaps are NOT required by the
+# pipelines. They are useful for developing/testing playbooks manually.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ansible-install-app
+  namespace: vm-demo
+data:
+  playbook.yaml: |
+    ---
+    - hosts: demo_vm
+      become: true
+      tasks:
+        - name: Install nginx
+          ansible.builtin.dnf:
+            name: nginx
+            state: present
+
+        - name: Deploy application v1.0
+          ansible.builtin.copy:
+            dest: /usr/share/nginx/html/index.html
+            content: "<h1>Demo App v1.0 — served by {{ inventory_hostname }}</h1>"
+
+        - name: Create health endpoint
+          ansible.builtin.copy:
+            dest: /usr/share/nginx/html/health
+            content: "ok"
+
+        - name: Start and enable nginx
+          ansible.builtin.service:
+            name: nginx
+            state: started
+            enabled: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ansible-upgrade-app
+  namespace: vm-demo
+data:
+  playbook.yaml: |
+    ---
+    - hosts: demo_vm
+      become: true
+      tasks:
+        - name: Deploy application v2.0
+          ansible.builtin.copy:
+            dest: /usr/share/nginx/html/index.html
+            content: "<h1>Demo App v2.0 — served by {{ inventory_hostname }}</h1>"
+
+        - name: Reload nginx
+          ansible.builtin.service:
+            name: nginx
+            state: reloaded

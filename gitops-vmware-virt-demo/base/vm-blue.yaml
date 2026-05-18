@@ -1,0 +1,58 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-vm-blue
+  namespace: vm-demo
+  labels:
+    app: demo-app
+    slot: blue
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+    - metadata:
+        name: rhel9-blue
+      spec:
+        storage:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 30Gi
+        source:
+          pvc:
+            namespace: openshift-virtualization-os-images
+            name: rhel9
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        kubevirt.io/domain: demo-vm-blue
+    spec:
+      domain:
+        resources:
+          requests:
+            memory: 2Gi
+        cpu:
+          cores: 2
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: rhel9-blue
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: vm-cloud-init

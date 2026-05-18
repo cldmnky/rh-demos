@@ -1,0 +1,25 @@
+---
+# install-app.yaml — installs nginx and serves v1.0 on the target VM
+- hosts: demo_vm
+  become: true
+  tasks:
+    - name: Install nginx
+      ansible.builtin.dnf:
+        name: nginx
+        state: present
+
+    - name: Deploy application v1.0
+      ansible.builtin.copy:
+        dest: /usr/share/nginx/html/index.html
+        content: "<h1>Demo App v1.0 — served by {{ inventory_hostname }}</h1>"
+
+    - name: Create health endpoint
+      ansible.builtin.copy:
+        dest: /usr/share/nginx/html/health
+        content: "ok"
+
+    - name: Start and enable nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true

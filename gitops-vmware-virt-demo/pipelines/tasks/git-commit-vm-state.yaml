@@ -1,0 +1,52 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-commit-vm-state
+  namespace: vm-demo
+spec:
+  params:
+    - name: vm-file
+      description: "VM manifest filename (e.g. vm-blue.yaml or vm-green.yaml)"
+    - name: run-strategy
+      description: "Desired runStrategy: Always | Halted"
+    - name: commit-message
+      description: "Git commit message"
+    - name: git-repo-url
+      description: "HTTPS URL of the Git repository"
+  steps:
+    - name: clone-modify-push
+      image: alpine:3.20
+      env:
+        - name: GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: gitea-token
+              key: username
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitea-token
+              key: token
+      script: |
+        #!/bin/sh
+        set -eu
+        apk add --no-cache git yq
+
+        AUTH_URL="$(params.git-repo-url)"
+        AUTH_URL="$(echo "$AUTH_URL" | sed "s#^http://#http://$GIT_USERNAME:$GIT_TOKEN@#; s#^https://#https://$GIT_USERNAME:$GIT_TOKEN@#")"
+
+        git clone "$AUTH_URL" /workspace/repo
+        cd /workspace/repo
+
+        yq e '.spec.runStrategy = "$(params.run-strategy)"' \
+          -i base/$(params.vm-file)
+
+        git config user.email "tekton@openshift.local"
+        git config user.name "Tekton Pipeline"
+        git add base/$(params.vm-file)
+        git diff --cached --quiet && {
+          echo "No Git changes needed — runStrategy already set to $(params.run-strategy)"
+          exit 0
+        }
+        git commit -m "$(params.commit-message)"
+        git push

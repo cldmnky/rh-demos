@@ -1,0 +1,77 @@
+---
+# EventListener — receives Gitea webhook and triggers the upgrade pipeline
+# when pipelines/app-version.yaml is updated on the main branch.
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: upgrade-trigger
+  namespace: vm-demo
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: gitea-push-trigger
+      interceptors:
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: >
+                body.ref == 'refs/heads/main' &&
+                body.commits.exists(c, c.modified.exists(f, f == 'pipelines/app-version.yaml') ||
+                                       c.added.exists(f, f == 'pipelines/app-version.yaml'))
+      bindings:
+        - ref: upgrade-binding
+      template:
+        ref: upgrade-template
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: upgrade-binding
+  namespace: vm-demo
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.clone_url)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: upgrade-template
+  namespace: vm-demo
+spec:
+  params:
+    - name: git-repo-url
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: upgrade-app-
+        namespace: vm-demo
+      spec:
+        pipelineRef:
+          name: upgrade-app
+        params:
+          - name: git-repo-url
+            value: $(tt.params.git-repo-url)
+          - name: lb-ip-url
+            value: http://192.168.10.50  # update to your MetalLB IP
+          - name: run-id
+            value: $(uid)
+        workspaces:
+          - name: ssh-key
+            secret:
+              secretName: vm-ssh-key
+---
+# Route to expose the EventListener so Gitea can reach it
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: upgrade-trigger
+  namespace: vm-demo
+spec:
+  to:
+    kind: Service
+    name: el-upgrade-trigger
+  port:
+    targetPort: http-listener

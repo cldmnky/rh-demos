@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: smoke-test
+  namespace: vm-demo
+spec:
+  params:
+    - name: url
+      description: "URL to health-check (must return HTTP 200)"
+    - name: retries
+      description: "Number of retry attempts with 5-second backoff"
+      default: "12"
+  steps:
+    - name: curl-health
+      image: curlimages/curl:8.7.1
+      script: |
+        #!/bin/sh
+        set -eu
+        RETRIES=$(params.retries)
+        URL="$(params.url)"
+        i=0
+        while [ $i -lt $RETRIES ]; do
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+          if [ "$STATUS" = "200" ]; then
+            echo "Smoke test passed: $URL returned 200"
+            exit 0
+          fi
+          echo "Attempt $((i+1))/$RETRIES — got $STATUS, retrying in 5s..."
+          sleep 5
+          i=$((i+1))
+        done
+        echo "Smoke test FAILED: $URL did not return 200 after $RETRIES attempts"
+        exit 1

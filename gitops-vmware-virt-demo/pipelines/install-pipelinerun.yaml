@@ -1,0 +1,17 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: install-app-
+  namespace: vm-demo
+spec:
+  pipelineRef:
+    name: install-app
+  params:
+    - name: git-repo-url
+      value: http://gitea-http.gitea.svc/demo-org/vm-demo.git  # update to your repo URL
+    - name: lb-ip-url
+      value: http://192.168.10.50  # update to your MetalLB IP
+  workspaces:
+    - name: ssh-key
+      secret:
+        secretName: vm-ssh-key

@@ -1,0 +1,8 @@
+# Bump this value to trigger the upgrade pipeline via a Gitea webhook → EventListener
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-version
+  namespace: vm-demo
+data:
+  version: "v1.0"

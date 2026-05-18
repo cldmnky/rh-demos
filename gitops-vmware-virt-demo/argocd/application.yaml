@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vm-demo
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: http://gitea-http.gitea.svc/demo-org/vm-demo.git  # update to your Git repo URL
+    targetRevision: main
+    path: base
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vm-demo
+  syncPolicy:
+    automated:
+      prune: true      # removes resources deleted from Git
+      selfHeal: true   # reverts out-of-band cluster changes
+    syncOptions:
+      - CreateNamespace=true

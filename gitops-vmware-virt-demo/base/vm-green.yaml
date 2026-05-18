@@ -1,0 +1,58 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: demo-vm-green
+  namespace: vm-demo
+  labels:
+    app: demo-app
+    slot: green
+spec:
+  runStrategy: Halted  # powered off — zero compute cost; powered on by Tekton during upgrade
+  dataVolumeTemplates:
+    - metadata:
+        name: rhel9-green
+      spec:
+        storage:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 30Gi
+        source:
+          pvc:
+            namespace: openshift-virtualization-os-images
+            name: rhel9
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        kubevirt.io/domain: demo-vm-green
+    spec:
+      domain:
+        resources:
+          requests:
+            memory: 2Gi
+        cpu:
+          cores: 2
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: rhel9-green
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: vm-cloud-init

@@ -1,0 +1,40 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ansible-run-playbook
+  namespace: vm-demo
+spec:
+  params:
+    - name: ssh-host
+      description: "SSH hostname or ClusterIP service FQDN for the target VM"
+    - name: playbook-content
+      description: "Ansible playbook YAML content (passed as a string)"
+    - name: ssh-user
+      description: "SSH user on the VM"
+      default: cloud-user
+  workspaces:
+    - name: ssh-key
+      description: "Secret volume containing the SSH private key at id_rsa"
+  steps:
+    - name: run-ansible
+      image: ghcr.io/ansible/community-ansible-dev-tools:latest
+      # Pass playbook content via env to avoid shell-escaping issues;
+      # Tekton substitutes $(params.playbook-content) at the env-value level.
+      env:
+        - name: PLAYBOOK_CONTENT
+          value: $(params.playbook-content)
+      script: |
+        #!/bin/bash
+        set -eu
+
+        PRIVATE_KEY="$(workspaces.ssh-key.path)/id_rsa"
+        chmod 0600 "$PRIVATE_KEY"
+
+        printf '%s\n' "$PLAYBOOK_CONTENT" > /tmp/playbook.yaml
+
+        {
+          echo "[demo_vm]"
+          echo "$(params.ssh-host) ansible_user=$(params.ssh-user) ansible_ssh_private_key_file=$PRIVATE_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'"
+        } > /tmp/inventory.ini
+
+        ansible-playbook -i /tmp/inventory.ini /tmp/playbook.yaml

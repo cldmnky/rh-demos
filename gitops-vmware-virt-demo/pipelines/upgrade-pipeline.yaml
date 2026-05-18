@@ -1,0 +1,168 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: upgrade-app
+  namespace: vm-demo
+spec:
+  params:
+    - name: git-repo-url
+      description: "HTTPS URL of the demo Git repository"
+    - name: lb-ip-url
+      description: "URL of the MetalLB LoadBalancer (http://<LB_IP>)"
+    - name: run-id
+      description: "Unique identifier for this upgrade run (e.g. pipeline run name)"
+  workspaces:
+    - name: ssh-key
+      description: "SSH private key secret (key: id_rsa)"
+  tasks:
+    # [1] Safety net: snapshot blue before touching anything
+    # Uses openshift-client task via cluster resolver (no snapshot task in kubevirt-tekton-tasks)
+    - name: snapshot-blue
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: openshift-client
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: SCRIPT
+          value: |
+            cat <<EOF | oc apply -f -
+            apiVersion: snapshot.kubevirt.io/v1beta1
+            kind: VirtualMachineSnapshot
+            metadata:
+              name: blue-pre-upgrade-$(params.run-id)
+              namespace: vm-demo
+            spec:
+              source:
+                apiGroup: kubevirt.io
+                kind: VirtualMachine
+                name: demo-vm-blue
+            EOF
+            oc wait --for=condition=Ready \
+              virtualmachinesnapshot/blue-pre-upgrade-$(params.run-id) \
+              -n vm-demo --timeout=300s
+
+    # [2] Git commit: start green VM
+    - name: git-start-green
+      runAfter:
+        - snapshot-blue
+      taskRef:
+        kind: Task
+        name: git-commit-vm-state
+      params:
+        - name: vm-file
+          value: vm-green.yaml
+        - name: run-strategy
+          value: Always
+        - name: commit-message
+          value: "[upgrade-pipeline] start green VM for upgrade run $(params.run-id)"
+        - name: git-repo-url
+          value: $(params.git-repo-url)
+
+    # [3] Wait for green VMI to reach Running phase
+    - name: wait-for-green
+      runAfter:
+        - git-start-green
+      taskRef:
+        resolver: hub
+        params:
+          - name: catalog
+            value: kubevirt-tekton-tasks
+          - name: type
+            value: artifact
+          - name: kind
+            value: task
+          - name: name
+            value: wait-for-vmi-status
+          - name: version
+            value: v0.25.0
+      params:
+        - name: vmiName
+          value: demo-vm-green
+        - name: vmiNamespace
+          value: vm-demo
+        - name: successCondition
+          value: status.phase == Running
+        - name: failureCondition
+          value: status.phase in (Failed, Unknown)
+
+    # [4] Ansible: deploy v2.0 onto green
+    - name: ansible-upgrade
+      runAfter:
+        - wait-for-green
+      taskRef:
+        kind: Task
+        name: ansible-run-playbook
+      params:
+        - name: ssh-host
+          value: demo-vm-green-ssh.vm-demo.svc.cluster.local
+        - name: playbook-content
+          value: |
+            ---
+            - hosts: demo_vm
+              become: true
+              tasks:
+                - name: Deploy application v2.0
+                  ansible.builtin.copy:
+                    dest: /usr/share/nginx/html/index.html
+                    content: "<h1>Demo App v2.0 — served by {{ inventory_hostname }}</h1>"
+
+                - name: Reload nginx
+                  ansible.builtin.service:
+                    name: nginx
+                    state: reloaded
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key
+
+    # [5] Smoke test green directly via SSH service
+    - name: smoke-test
+      runAfter:
+        - ansible-upgrade
+      taskRef:
+        kind: Task
+        name: smoke-test
+      params:
+        - name: url
+          value: http://demo-vm-green-ssh.vm-demo.svc.cluster.local/health
+
+    # [6-PASS] Cutover: traffic → green, blue → Halted
+    - name: git-cutover
+      runAfter:
+        - smoke-test
+      taskRef:
+        kind: Task
+        name: git-commit-cutover
+      params:
+        - name: active-slot
+          value: green
+        - name: halted-vm-file
+          value: vm-blue.yaml
+        - name: commit-message
+          value: "[upgrade-pipeline] cutover to green — smoke test passed (run $(params.run-id))"
+        - name: git-repo-url
+          value: $(params.git-repo-url)
+
+  # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
+  finally:
+    - name: git-stop-green-on-failure
+      taskRef:
+        kind: Task
+        name: git-commit-vm-state
+      when:
+        - input: "$(tasks.smoke-test.status)"
+          operator: in
+          values: ["Failed"]
+      params:
+        - name: vm-file
+          value: vm-green.yaml
+        - name: run-strategy
+          value: Halted
+        - name: commit-message
+          value: "[upgrade-pipeline] smoke test failed — halting green (run $(params.run-id))"
+        - name: git-repo-url
+          value: $(params.git-repo-url)

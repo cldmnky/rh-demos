@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-lb
+  namespace: vm-demo
+  annotations:
+    metallb.universe.tf/address-pool: demo-pool
+spec:
+  type: LoadBalancer
+  selector:
+    kubevirt.io/domain: demo-vm-blue  # updated to demo-vm-green on cutover
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

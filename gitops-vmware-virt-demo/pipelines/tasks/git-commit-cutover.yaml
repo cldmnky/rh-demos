@@ -1,0 +1,57 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-commit-cutover
+  namespace: vm-demo
+spec:
+  params:
+    - name: active-slot
+      description: "Slot to route traffic to: blue | green"
+    - name: halted-vm-file
+      description: "VM manifest to halt (e.g. vm-blue.yaml)"
+    - name: commit-message
+      description: "Git commit message"
+    - name: git-repo-url
+      description: "HTTPS URL of the Git repository"
+  steps:
+    - name: clone-modify-push
+      image: alpine:3.20
+      env:
+        - name: GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: gitea-token
+              key: username
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitea-token
+              key: token
+      script: |
+        #!/bin/sh
+        set -eu
+        apk add --no-cache git yq
+
+        AUTH_URL="$(params.git-repo-url)"
+        AUTH_URL="$(echo "$AUTH_URL" | sed "s#^http://#http://$GIT_USERNAME:$GIT_TOKEN@#; s#^https://#https://$GIT_USERNAME:$GIT_TOKEN@#")"
+
+        git clone "$AUTH_URL" /workspace/repo
+        cd /workspace/repo
+
+        # Update service selector to active slot
+        yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-$(params.active-slot)"' \
+          -i base/service-lb.yaml
+
+        # Halt the outgoing VM
+        yq e '.spec.runStrategy = "Halted"' \
+          -i base/$(params.halted-vm-file)
+
+        git config user.email "tekton@openshift.local"
+        git config user.name "Tekton Pipeline"
+        git add base/service-lb.yaml base/$(params.halted-vm-file)
+        git diff --cached --quiet && {
+          echo "No Git changes needed"
+          exit 0
+        }
+        git commit -m "$(params.commit-message)"
+        git push
