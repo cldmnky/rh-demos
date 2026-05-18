@@ -27,6 +27,10 @@ oc delete application vm-demo vm-demo-infra -n "${NAMESPACE}" --ignore-not-found
 echo "→ Removing AppProject from ${ARGOCD_NS}..."
 oc delete appproject vm-demo -n "${ARGOCD_NS}" --ignore-not-found
 
+# Delete ArgoCD controller permissions in the demo namespace
+echo "→ Removing ArgoCD controller RoleBinding from ${NAMESPACE}..."
+oc delete rolebinding openshift-gitops-argocd-application-controller-admin -n "${NAMESPACE}" --ignore-not-found
+
 # Remove sourceNamespaces patch from ArgoCD CR
 echo "→ Removing sourceNamespaces from ArgoCD CR..."
 oc patch argocd openshift-gitops -n "${ARGOCD_NS}" \

@@ -51,6 +51,7 @@ gitops-vmware-virt-demo/
 ├── README.md
 ├── argocd/
 │   └── application.yaml         # ArgoCD Application (prune: true, selfHeal: true)
+│   └── rbac.yaml                # ArgoCD controller permissions in vm-demo
 ├── base/                        # ArgoCD sync target
 │   ├── vm-blue.yaml             # VirtualMachine — runStrategy: Always
 │   ├── vm-green.yaml            # VirtualMachine — runStrategy: Halted (standby)
@@ -184,6 +185,7 @@ This demo uses `https://github.com/cldmnky/rh-demos` as the ArgoCD source. For a
 ```bash
 # App 1: VMs and services (what ArgoCD drives during the demo)
 oc apply -f argocd/appproject.yaml
+oc apply -f argocd/rbac.yaml
 oc apply -f argocd/application.yaml -n vm-demo
 
 # App 2: Pipeline infrastructure (tasks, pipelines, event-listener)

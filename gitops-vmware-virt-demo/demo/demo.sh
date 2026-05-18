@@ -171,6 +171,13 @@ pe "oc apply -f ${DEMO_DIR}/argocd/appproject.yaml"
 wait
 clear
 
+comment "Grant the ArgoCD application controller admin access in vm-demo so it can create VMs, Services, and pipelines."
+pe "cat ${DEMO_DIR}/argocd/rbac.yaml"
+wait
+pe "oc apply -f ${DEMO_DIR}/argocd/rbac.yaml"
+wait
+clear
+
 comment "Application 1: VMs and services — ArgoCD syncs gitops-vmware-virt-demo/base/ to the cluster."
 comment "This Application lives in the vm-demo namespace — not in openshift-gitops."
 pe "cat ${DEMO_DIR}/argocd/application.yaml"
