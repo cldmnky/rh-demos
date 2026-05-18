@@ -27,7 +27,9 @@ spec:
         #!/bin/bash
         set -eu
 
-        PRIVATE_KEY="$(workspaces.ssh-key.path)/id_rsa"
+        # Secret mounts are read-only — copy key to writable /tmp
+        PRIVATE_KEY="/tmp/id_rsa"
+        cp "$(workspaces.ssh-key.path)/id_rsa" "$PRIVATE_KEY"
         chmod 0600 "$PRIVATE_KEY"
 
         printf '%s\n' "$PLAYBOOK_CONTENT" > /tmp/playbook.yaml
