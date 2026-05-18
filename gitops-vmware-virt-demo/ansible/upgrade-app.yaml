@@ -5,10 +5,10 @@
   tasks:
     - name: Deploy application v2.0
       ansible.builtin.copy:
-        dest: /usr/share/nginx/html/index.html
+        dest: /opt/demo-app/index.html
         content: "<h1>Demo App v2.0 — served by {{ inventory_hostname }}</h1>"
 
-    - name: Reload nginx
-      ansible.builtin.service:
-        name: nginx
-        state: reloaded
+    - name: Restart demo-app
+      ansible.builtin.systemd:
+        name: demo-app
+        state: restarted

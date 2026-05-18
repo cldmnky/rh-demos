@@ -118,6 +118,7 @@ pe "oc create secret generic vm-cloud-init \
   --from-literal=userdata='#cloud-config
 users:
   - name: rhel
+    sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
       - ${PUB_KEY}
 chpasswd:

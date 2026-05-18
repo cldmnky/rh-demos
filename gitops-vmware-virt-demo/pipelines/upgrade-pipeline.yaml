@@ -110,26 +110,45 @@ spec:
             - hosts: demo_vm
               become: true
               tasks:
-                - name: Install nginx
-                  ansible.builtin.dnf:
-                    name: nginx
-                    state: present
+                - name: Create app directory
+                  ansible.builtin.file:
+                    path: /opt/demo-app
+                    state: directory
+                    mode: "0755"
 
                 - name: Deploy application v2.0
                   ansible.builtin.copy:
-                    dest: /usr/share/nginx/html/index.html
+                    dest: /opt/demo-app/index.html
                     content: "<h1>Demo App v2.0 — served by {{ inventory_hostname }}</h1>"
 
                 - name: Create health endpoint
                   ansible.builtin.copy:
-                    dest: /usr/share/nginx/html/health
+                    dest: /opt/demo-app/health
                     content: "ok"
 
-                - name: Start and enable nginx
-                  ansible.builtin.service:
-                    name: nginx
+                - name: Create systemd service
+                  ansible.builtin.copy:
+                    dest: /etc/systemd/system/demo-app.service
+                    content: |
+                      [Unit]
+                      Description=Demo App HTTP Server
+                      After=network.target
+
+                      [Service]
+                      Type=simple
+                      WorkingDirectory=/opt/demo-app
+                      ExecStart=/usr/bin/python3 -m http.server 80
+                      Restart=on-failure
+
+                      [Install]
+                      WantedBy=multi-user.target
+
+                - name: Start and enable demo-app
+                  ansible.builtin.systemd:
+                    name: demo-app
                     state: started
                     enabled: true
+                    daemon_reload: true
       workspaces:
         - name: ssh-key
           workspace: ssh-key
