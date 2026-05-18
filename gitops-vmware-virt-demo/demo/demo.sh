@@ -30,6 +30,7 @@ cd "${REPO_ROOT}"
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
+METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_DIR}/base/service-lb.yaml")
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
@@ -130,14 +131,16 @@ clear
 say "Setup 2 of 3 — MetalLB LoadBalancer Pool
 
 In vCenter you'd file an IPAM ticket and wait for NSX configuration.
-Here: a YAML file with an IP range. Applied once. Works immediately." 226
+Here we reuse the cluster's existing MetalLB pool.
+The demo defaults to a pool named '${METALLB_POOL}' in metallb-system." 226
 wait
 clear
 
-pe "cat ${DEMO_DIR}/metallb/ipaddresspool.yaml"
+comment "Verify the existing MetalLB pool. The demo does not create IPAddressPools by default."
+pe "oc get ipaddresspool ${METALLB_POOL} -n metallb-system"
 wait
-pe "oc apply -f ${DEMO_DIR}/metallb/ipaddresspool.yaml"
-pe "oc apply -f ${DEMO_DIR}/metallb/l2advertisement.yaml"
+comment "The LoadBalancer service requests that existing pool via annotation."
+pe "grep 'metallb.universe.tf/address-pool' ${DEMO_DIR}/base/service-lb.yaml"
 wait
 clear
 

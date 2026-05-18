@@ -59,8 +59,8 @@ gitops-vmware-virt-demo/
 │   ├── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
 │   └── service-green-http.yaml  # ClusterIP for pre-cutover HTTP smoke test
 ├── metallb/
-│   ├── ipaddresspool.yaml       # L2 address pool
-│   └── l2advertisement.yaml     # L2Advertisement
+│   ├── ipaddresspool.yaml       # Optional sample pool (not applied by demo.sh)
+│   └── l2advertisement.yaml     # Optional sample L2Advertisement
 ├── pipelines/
 │   ├── install-pipeline.yaml    # Tekton Pipeline: install-app
 │   ├── upgrade-pipeline.yaml    # Tekton Pipeline: upgrade-app
@@ -141,12 +141,13 @@ virtctl image-upload dv rhel9-golden \
 
 ### 1 — MetalLB
 
-Edit `metallb/ipaddresspool.yaml` to match your demo network, then apply:
+The demo reuses an existing MetalLB `IPAddressPool` in `metallb-system`. By default, the `demo-app-lb` Service requests a pool named `metallb`:
 
 ```bash
-oc apply -f metallb/ipaddresspool.yaml
-oc apply -f metallb/l2advertisement.yaml
+oc get ipaddresspool metallb -n metallb-system
 ```
+
+If your cluster uses another pool name, update `base/service-lb.yaml` before running the demo. The files in `metallb/` are optional examples only and are not applied by `demo/demo.sh`.
 
 ### 2 — Deploy Key and Cluster Secrets
 
@@ -339,8 +340,8 @@ oc get csv -n openshift-cnv | grep -E "Succeeded|Failed"
 oc get csv -n openshift-gitops | grep -E "Succeeded|Failed"
 oc get csv -n openshift-pipelines | grep -E "Succeeded|Failed"
 
-# 2. MetalLB pool configured
-oc get ipaddresspool -n metallb-system
+# 2. Existing MetalLB pool available
+oc get ipaddresspool metallb -n metallb-system
 
 # 3. RHEL9 boot source ready
 oc get datasource rhel9 -n openshift-virtualization-os-images \
