@@ -10,7 +10,7 @@ spec:
   runStrategy: Halted  # powered off — zero compute cost; powered on by Tekton during upgrade
   dataVolumeTemplates:
     - metadata:
-        name: rhel9-green
+        name: centos10-green
       spec:
         storage:
           accessModes:
@@ -21,7 +21,7 @@ spec:
           storageClassName: ocs-storagecluster-ceph-rbd-virtualization
         source:
           snapshot:
-            name: rhel9-ab4ec16077fe
+            name: centos-stream10-8a1243274fb1
             namespace: openshift-virtualization-os-images
   template:
     metadata:
@@ -52,7 +52,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: rhel9-green
+            name: centos10-green
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:

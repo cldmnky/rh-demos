@@ -1,44 +1,25 @@
 ---
-# install-app.yaml — deploys a Python HTTP server as v1.0 on the target VM
+# install-app.yaml — installs httpd and serves v1.0 on the target VM
 - hosts: demo_vm
   become: true
   tasks:
-    - name: Create app directory
-      ansible.builtin.file:
-        path: /opt/demo-app
-        state: directory
-        mode: "0755"
+    - name: Install httpd
+      ansible.builtin.dnf:
+        name: httpd
+        state: present
 
     - name: Deploy application v1.0
       ansible.builtin.copy:
-        dest: /opt/demo-app/index.html
+        dest: /var/www/html/index.html
         content: "<h1>Demo App v1.0 — served by {{ inventory_hostname }}</h1>"
 
     - name: Create health endpoint
       ansible.builtin.copy:
-        dest: /opt/demo-app/health
+        dest: /var/www/html/health
         content: "ok"
 
-    - name: Create systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/demo-app.service
-        content: |
-          [Unit]
-          Description=Demo App HTTP Server
-          After=network.target
-
-          [Service]
-          Type=simple
-          WorkingDirectory=/opt/demo-app
-          ExecStart=/usr/bin/python3 -m http.server 80
-          Restart=on-failure
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Start and enable demo-app
-      ansible.builtin.systemd:
-        name: demo-app
+    - name: Start and enable httpd
+      ansible.builtin.service:
+        name: httpd
         state: started
         enabled: true
-        daemon_reload: true

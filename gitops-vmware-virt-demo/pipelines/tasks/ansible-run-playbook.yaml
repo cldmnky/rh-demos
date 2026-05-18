@@ -11,7 +11,7 @@ spec:
       description: "Ansible playbook YAML content (passed as a string)"
     - name: ssh-user
       description: "SSH user on the VM"
-      default: rhel
+      default: cloud-user
   workspaces:
     - name: ssh-key
       description: "Secret volume containing the SSH private key at id_rsa"

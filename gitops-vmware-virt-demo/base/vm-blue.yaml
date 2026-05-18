@@ -10,7 +10,7 @@ spec:
   runStrategy: Always
   dataVolumeTemplates:
     - metadata:
-        name: rhel9-blue
+        name: centos10-blue
       spec:
         storage:
           accessModes:
@@ -21,7 +21,7 @@ spec:
           storageClassName: ocs-storagecluster-ceph-rbd-virtualization
         source:
           snapshot:
-            name: rhel9-ab4ec16077fe
+            name: centos-stream10-8a1243274fb1
             namespace: openshift-virtualization-os-images
   template:
     metadata:
@@ -52,7 +52,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: rhel9-blue
+            name: centos10-blue
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:

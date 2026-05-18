@@ -112,18 +112,18 @@ pe "oc create secret generic vm-ssh-key \
   --dry-run=client -o yaml | oc apply -f -"
 wait
 
-comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the rhel user's authorized_keys."
+comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the cloud-user's authorized_keys."
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
 pe "oc create secret generic vm-cloud-init \
   --from-literal=userdata='#cloud-config
 users:
-  - name: rhel
+  - name: cloud-user
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
       - ${PUB_KEY}
 chpasswd:
   list: |
-    rhel:redhat
+    cloud-user:redhat
   expire: false' \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
