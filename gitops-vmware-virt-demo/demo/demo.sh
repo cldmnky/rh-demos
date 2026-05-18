@@ -272,7 +272,7 @@ pe "oc get applications.argoproj.io vm-demo -n ${NAMESPACE} \
 wait
 
 comment "Tekton pipeline infrastructure — also managed by ArgoCD from Git."
-pe "oc get pipeline -n ${NAMESPACE}"
+pe "tkn pipeline list -n ${NAMESPACE}"
 wait
 
 comment "Traffic is currently routed to blue via the MetalLB LoadBalancer."
@@ -299,8 +299,7 @@ wait
 clear
 
 comment "The install pipeline: wait for VM ready → Ansible installs nginx + v1.0 → smoke test."
-pe "oc get pipeline install-app -n ${NAMESPACE} \
-  -o jsonpath='{.spec.tasks[*].name}' && echo"
+pe "tkn pipeline describe install-app -n ${NAMESPACE}"
 wait
 
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
