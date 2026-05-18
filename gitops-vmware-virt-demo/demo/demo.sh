@@ -56,17 +56,17 @@ function comment() {
 function wait_for_argo_sync() {
   local app="$1"
   comment "Waiting for ArgoCD to sync ${app}..."
-  until oc get application "${app}" -n "${NAMESPACE}" \
+  until oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.sync.status}' 2>/dev/null | grep -q "^Synced$"; do
     sleep 5
   done
   # vm-demo is Suspended (green VM is Halted by design) — accept Healthy or Suspended
-  until oc get application "${app}" -n "${NAMESPACE}" \
+  until oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.health.status}' 2>/dev/null | grep -qE "^(Healthy|Suspended)$"; do
     sleep 5
   done
   local health
-  health=$(oc get application "${app}" -n "${NAMESPACE}" \
+  health=$(oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.health.status}' 2>/dev/null)
   echo "✅ ${app}: Synced / ${health}"
 }
@@ -202,7 +202,7 @@ It will reconcile the cluster to match Git — continuously.
 Let's watch it work." 117
 wait
 
-pe "oc get applications -n ${NAMESPACE}"
+pe "oc get applications.argoproj.io -n ${NAMESPACE}"
 wait_for_argo_sync "vm-demo"
 wait_for_argo_sync "vm-demo-infra"
 wait
@@ -267,7 +267,7 @@ Edit that field, push to Git, ArgoCD starts the VM. That's it." 245
 wait
 
 comment "ArgoCD Application status — lives in vm-demo namespace, watched by the openshift-gitops instance."
-pe "oc get application vm-demo -n ${NAMESPACE} \
+pe "oc get applications.argoproj.io vm-demo -n ${NAMESPACE} \
   -o jsonpath='{.status.sync.status} / {.status.health.status}' && echo"
 wait
 
