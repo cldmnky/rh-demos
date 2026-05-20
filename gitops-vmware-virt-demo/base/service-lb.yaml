@@ -4,7 +4,7 @@ metadata:
   name: demo-app-lb
   namespace: vm-demo
   annotations:
-    metallb.universe.tf/address-pool: metallb
+    metallb.universe.tf/address-pool: demo-pool
 spec:
   type: LoadBalancer
   selector:
