@@ -478,13 +478,12 @@ wait
 clear
 
 comment "Bump the app version and push — ArgoCD and the upgrade pipeline are triggered explicitly."
-pe "git -C ${REPO_ROOT} pull origin main"
 pe "sed -i '' 's/version: \"v1.0\"/version: \"v2.0\"/' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'bump app version to v2.0'"
-pe "git -C ${REPO_ROOT} push origin main"
+pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
 sync_argo "vm-demo-infra"
 wait
 clear
@@ -541,11 +540,10 @@ wait
 clear
 
 comment "Step 1 — restart blue while traffic still flows to green. Zero downtime."
-pe "git -C ${REPO_ROOT} pull origin main"
 pe "yq e '.spec.runStrategy = \"Always\"' -i ${DEMO_DIR}/base/vm-blue.yaml"
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-blue.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'rollback: restart blue standby'"
-pe "git -C ${REPO_ROOT} push origin main"
+pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
 sync_argo "vm-demo"
 wait
 
@@ -555,12 +553,11 @@ pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120
 wait
 
 comment "Step 2 — roll forward: traffic back to blue, green halts."
-pe "git -C ${REPO_ROOT} pull origin main"
 pe "yq e '.spec.selector[\"kubevirt.io/domain\"] = \"demo-vm-blue\"' -i ${DEMO_DIR}/base/service-lb.yaml"
 pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/service-lb.yaml ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'rollback: traffic back to blue, halt green'"
-pe "git -C ${REPO_ROOT} push origin main"
+pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
 sync_argo "vm-demo"
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
