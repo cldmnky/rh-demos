@@ -426,16 +426,17 @@ wait
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
 dbg_step "ACT 2 — creating install PipelineRun"
 INSTALL_PR=$(oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE} -o name)
-dbg_run oc get pipelinerun ${INSTALL_PR##*/} -n ${NAMESPACE} -o yaml
+INSTALL_PR_NAME=${INSTALL_PR##*/}
+dbg_run oc get pipelinerun ${INSTALL_PR_NAME} -n ${NAMESPACE} -o yaml
 pe "echo ${INSTALL_PR}"
 wait
 clear
 
 comment "Watching the install-app pipeline logs stream in real-time. Every step is a Tekton Task."
-dbg_step "ACT 2 — streaming install-app logs (${INSTALL_PR##*/})"
+dbg_step "ACT 2 — streaming install-app logs ${INSTALL_PR_NAME}"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
 dbg_step "ACT 2 — waiting for install PipelineRun to complete"
-wait_for_pr "${INSTALL_PR##*/}"
+wait_for_pr "${INSTALL_PR_NAME}"
 dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 wait
@@ -491,16 +492,17 @@ clear
 comment "Triggering the upgrade pipeline directly — no webhook needed."
 dbg_step "ACT 3 — creating upgrade PipelineRun"
 UPGRADE_PR=$(oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n ${NAMESPACE} -o name)
-dbg_run oc get pipelinerun ${UPGRADE_PR##*/} -n ${NAMESPACE} -o yaml
+UPGRADE_PR_NAME=${UPGRADE_PR##*/}
+dbg_run oc get pipelinerun ${UPGRADE_PR_NAME} -n ${NAMESPACE} -o yaml
 pe "echo ${UPGRADE_PR}"
 wait
 clear
 
 comment "Streaming upgrade-app logs. ArgoCD syncs are triggered inside the pipeline after each git commit."
-dbg_step "ACT 3 — streaming upgrade-app logs (${UPGRADE_PR##*/})"
+dbg_step "ACT 3 — streaming upgrade-app logs ${UPGRADE_PR_NAME}"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix"
 dbg_step "ACT 3 — waiting for upgrade PipelineRun to complete"
-wait_for_pr "${UPGRADE_PR##*/}"
+wait_for_pr "${UPGRADE_PR_NAME}"
 dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\\n"}'
