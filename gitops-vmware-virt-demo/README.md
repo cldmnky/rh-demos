@@ -238,25 +238,46 @@ oc get route upgrade-trigger -n vm-demo
 
 ## Running the Demo
 
+The terminal experience is fully automated using [`demo-magic`](https://github.com/paxtonhare/demo-magic). The `demo/demo.sh` script simulates typing commands and pauses for you to speak and explain what is happening.
+
+**Start the demo:**
+
+```bash
+cd gitops-vmware-virt-demo
+./demo/demo.sh
+```
+
+**Controls during the demo:**
+- Press `ENTER` or `SPACE` to advance to the next step when the script pauses.
+- Use `CTRL+C` to abort the script.
+
+**Optional flags:**
+- `-n`: No wait (auto-advance without pausing)
+- `-d`: Disable simulated typing (instant output)
+- `-w <secs>`: Auto-advance after N seconds
+
+### The Flow
+
+The script automatically executes the setup, the three acts, and the rollback. While the script runs in the terminal, keep browser tabs open to show the visual changes:
+- ArgoCD console
+- OpenShift Pipelines console
+- GitHub repository
+- OpenShift Virtualization console
+
+Here is what happens during the run:
+
+### Setup
+
+The script begins by setting up the environment: creating the namespace, secrets, and the ArgoCD applications. It waits for the VMs to reach their initial state (Blue running, Green halted).
+
 ### Act 1 — GitOps VM Creation (~5 min)
 
 > [SPEAKER NOTE: Opening]
 > In VMware, creating a VM means clicking through vCenter wizards and it lives only in vCenter. Here, every VM is a YAML file in Git — including the standby VM we'll use for upgrades later. This is **declarative infrastructure** for VMs.
 
-1. Open the GitHub repo. Show `chart/values.yaml` — note `blue.runStrategy: Always`, `green.runStrategy: Halted`, and `traffic.activeSlot: blue`. These values drive the Helm templates.
-2. Open the ArgoCD console. Show the `vm-demo` Application synced, with both VMs and the LB service in the resource tree.
-3. Show the VM states and MetalLB IP:
-
-```bash
-oc get vm -n vm-demo
-# NAME            STATUS    READY
-# demo-vm-blue    Running   True
-# demo-vm-green   Stopped   False
-
-oc get svc demo-app-lb -n vm-demo
-# NAME           TYPE           EXTERNAL-IP     PORT(S)
-# demo-app-lb    LoadBalancer   192.168.10.50   80:xxxxx/TCP
-```
+- The script shows the `chart/values.yaml` defaults driving the Helm templates.
+- **Show in UI:** Open the ArgoCD console to show the `vm-demo` Application synced, with both VMs and the LB service in the resource tree.
+- The script queries the VM states and the LoadBalancer IP.
 
 > [SPEAKER NOTE: MetalLB]
 > The VM already has a real external IP. MetalLB assigned it automatically — no IPAM ticket, no NSX config. MetalLB is OpenShift's native load balancing solution, replacing complex third-party tools.
@@ -266,21 +287,9 @@ oc get svc demo-app-lb -n vm-demo
 > [SPEAKER NOTE: Installation]
 > Now let's install an application on the VM. In VMware, you'd SSH in manually or use a configuration management tool you'd have to integrate yourself. Here, Tekton pipelines handle that — with Ansible as the task runner. The integration is seamless and automated.
 
-1. Open the Pipelines console. Walk through the `install-app` pipeline graph.
-2. Trigger the pipeline:
-
-```bash
-oc create -f pipelines/install-pipelinerun.yaml -n vm-demo
-```
-
-3. Show the Ansible task logs in the Tekton console.
-4. Show the running application:
-
-```bash
-LB_IP=$(oc get svc demo-app-lb -n vm-demo -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-curl http://$LB_IP/
-# <h1>Demo App v1.0 — served by demo-vm-blue</h1>
-```
+- **Show in UI:** Open the Pipelines console to show the `install-app` pipeline graph.
+- The script triggers the pipeline and streams the Ansible task logs in the terminal.
+- Finally, it curls the LoadBalancer IP to show the running application v1.0.
 
 ### Act 3 — Blue/Green Upgrade with Rollback (~8 min)
 
@@ -291,78 +300,24 @@ The upgrade pipeline flow:
 
 ```
 [1] snapshot-blue     → VirtualMachineSnapshot safety net
-[2] git-start-green   → Commit: vm-green.yaml runStrategy: Always → ArgoCD starts green
+[2] git-start-green   → Patch ArgoCD params: green=Always, disk=blue-snapshot
 [3] wait-for-green    → Poll VMI until Running
 [4] ansible-upgrade   → Ansible installs v2.0 on green
 [5] smoke-test        → curl http://demo-vm-green-http/health
 
-PASS → [6] git-cutover  → Commit: service selector → green, vm-blue → Halted
-FAIL → [6] git-stop-green → Commit: vm-green → Halted (blue unchanged)
+PASS → [6] git-cutover  → Patch ArgoCD params: traffic=green, blue=Halted
+FAIL → [6] git-stop-green → Patch ArgoCD params: green=Halted
 ```
 
-**Trigger the upgrade** by bumping the version in `gitops-vmware-virt-demo/pipelines/app-version.yaml` and pushing (GitHub webhook fires the EventListener), or manually:
-
-```bash
-# Edit gitops-vmware-virt-demo/pipelines/app-version.yaml: version: "v2.0"
-git add gitops-vmware-virt-demo/pipelines/app-version.yaml
-git commit -m "bump app version to v2.0"
-git push origin main
-```
-
-**Watch in real time:**
-
-```bash
-# VM state transitions
-oc get vm -n vm-demo -w
-
-# ArgoCD sync events
-oc get events -n vm-demo --field-selector reason=ResourceUpdated -w
-```
-
-**After cutover:**
-
-```bash
-curl http://$LB_IP/
-# <h1>Demo App v2.0 — served by demo-vm-green</h1>
-
-oc get vm -n vm-demo
-# NAME            STATUS    READY
-# demo-vm-blue    Stopped   False   ← halted, still in Git, zero compute
-# demo-vm-green   Running   True    ← now active
-```
+- The script updates `app-version.yaml` to `v2.0` and commits it to Git.
+- It triggers the upgrade pipeline and streams the logs.
+- After cutover, it curls the LoadBalancer IP to show v2.0 is live on `demo-vm-green`.
 
 *"Same IP. Zero downtime. Blue is halted — still in Git, and can be restarted for rollback."*
 
 **Rollback (optional, high impact):**
 
-The rollback uses ArgoCD Helm parameter patches — no Git commits needed:
-
-```bash
-# Step 1: Restart blue while traffic still flows to green
-oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[
-    {"name":"blue.runStrategy","value":"Always"},
-    {"name":"green.runStrategy","value":"Always"},
-    {"name":"traffic.activeSlot","value":"green"}
-  ]}}}}'
-# Wait for ArgoCD sync and blue VM to be Ready
-
-# Step 2: Cutover back to blue and halt green
-oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[
-    {"name":"blue.runStrategy","value":"Always"},
-    {"name":"green.runStrategy","value":"Halted"},
-    {"name":"traffic.activeSlot","value":"blue"}
-  ]}}}}'
-
-# Step 3: Delete green resources and clear overrides
-oc delete vm demo-vm-green datavolume centos10-green pvc centos10-green -n vm-demo
-oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
-
-curl http://$LB_IP/
-# <h1>Demo App v1.0 — served by demo-vm-blue</h1>
-```
+The script then performs the rollback using ArgoCD Helm parameter patches — no Git commits needed. It restarts blue, cuts traffic back, halts green, and deletes the green resources.
 
 > [SPEAKER NOTE: Rollback Summary]
 > In VMware: find the snapshot, revert, wait for boot, re-point the load balancer manually. Here: Git commits, ArgoCD reconciliation. The entire process is auditable and repeatable through Git.
@@ -415,22 +370,14 @@ oc get svc demo-vm-blue-ssh demo-vm-green-ssh demo-vm-green-http -n vm-demo
 oc get pipeline install-app upgrade-app -n vm-demo
 ```
 
-### Reset Between Runs
+### Automatic Reset Between Runs
 
-```bash
-# Reset app version to v1.0
-sed -i 's/version: "v2.0"/version: "v1.0"/' gitops-vmware-virt-demo/pipelines/app-version.yaml
-git add gitops-vmware-virt-demo/pipelines/app-version.yaml
-git commit -m "chore: reset demo state to v1.0"
-git push origin main
+The `demo.sh` script includes a pre-flight check that automatically resets the environment to its initial state before starting:
+- Reverts `app-version.yaml` to `v1.0` and commits it to Git
+- Clears any ArgoCD Helm parameter overrides left over from previous upgrades or rollbacks
+- Waits for ArgoCD to sync the cluster back to the `values.yaml` defaults (`blue=Always`, `green=Halted`, `traffic=blue`)
 
-# Clear any ArgoCD Helm parameter overrides
-oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
-
-# ArgoCD syncs → cluster matches values.yaml defaults in ~30 seconds
-# (blue=Always, green=Halted, traffic=blue)
-```
+You do not need to manually reset the environment between presentations.
 
 ---
 
