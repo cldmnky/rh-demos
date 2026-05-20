@@ -112,10 +112,70 @@ spec:
               done
               echo "Green VM and DataVolume deleted."
 
-              # Ask ArgoCD to refresh and wait for the concrete child resource.
-              # Waiting on Application operationState is brittle when automated selfHeal is active.
-              oc annotate application.argoproj.io vm-demo -n vm-demo \
-                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
+              # Apply the matching child resource state immediately. The Application
+              # parameters above remain the desired state; this avoids relying on
+              # ArgoCD operationState, which can be racy with automated selfHeal.
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: demo-vm-green
+                namespace: vm-demo
+                labels:
+                  app: demo-app
+                  slot: green
+              spec:
+                runStrategy: Always
+                dataVolumeTemplates:
+                  - metadata:
+                      name: centos10-green
+                    spec:
+                      storage:
+                        accessModes:
+                          - ReadWriteMany
+                        resources:
+                          requests:
+                            storage: 30Gi
+                        storageClassName: ocs-storagecluster-ceph-rbd-virtualization
+                      source:
+                        snapshot:
+                          name: ${SNAPSHOT}
+                          namespace: vm-demo
+                template:
+                  metadata:
+                    labels:
+                      app: demo-app
+                      kubevirt.io/domain: demo-vm-green
+                  spec:
+                    domain:
+                      resources:
+                        requests:
+                          memory: 2Gi
+                      cpu:
+                        cores: 2
+                      devices:
+                        disks:
+                          - name: rootdisk
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                    networks:
+                      - name: default
+                        pod: {}
+                    volumes:
+                      - name: rootdisk
+                        dataVolume:
+                          name: centos10-green
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          secretRef:
+                            name: vm-cloud-init
+              EOF
 
               echo "Waiting for green VM to be rendered from ${VM_SNAPSHOT}/${SNAPSHOT}..."
               DEADLINE=$(( $(date +%s) + 600 ))
@@ -248,8 +308,10 @@ spec:
                     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
                   ]}}}}"
 
-              oc annotate application.argoproj.io vm-demo -n vm-demo \
-                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
+              oc patch service demo-app-lb -n vm-demo --type=merge \
+                --patch '{"spec":{"selector":{"kubevirt.io/domain":"demo-vm-green"}}}'
+              oc patch vm demo-vm-blue -n vm-demo --type=merge \
+                --patch '{"spec":{"runStrategy":"Halted"}}'
 
               echo "Waiting for cutover (traffic → green, blue → Halted)..."
               DEADLINE=$(( $(date +%s) + 600 ))
@@ -306,8 +368,10 @@ spec:
                     {"name":"traffic.activeSlot","value":"blue"}
                   ]}}}}'
 
-              oc annotate application.argoproj.io vm-demo -n vm-demo \
-                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
+              oc patch service demo-app-lb -n vm-demo --type=merge \
+                --patch '{"spec":{"selector":{"kubevirt.io/domain":"demo-vm-blue"}}}'
+              oc patch vm demo-vm-green -n vm-demo --type=merge \
+                --patch '{"spec":{"runStrategy":"Halted"}}'
 
               DEADLINE=$(( $(date +%s) + 600 ))
               until [[ "$(oc get svc demo-app-lb -n vm-demo \
