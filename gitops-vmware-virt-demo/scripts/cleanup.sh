@@ -41,8 +41,14 @@ oc patch argocd openshift-gitops -n "${ARGOCD_NS}" \
 # the demo flow, so cleanup intentionally leaves metallb-system untouched.
 echo "→ Leaving existing MetalLB configuration untouched..."
 
-# Delete entire vm-demo namespace (removes VMs, pipelines, secrets, services, etc.)
-echo "→ Deleting namespace ${NAMESPACE} (VMs, pipelines, secrets, services)..."
+# Delete VirtualMachineSnapshots before namespace deletion to avoid finalizer-induced stalls.
+# The upgrade pipeline creates blue-pre-upgrade-<run-id> snapshots; their VirtualMachineSnapshotContent
+# objects are namespace-scoped and cascade-deleted when the snapshot is deleted.
+echo "→ Removing VirtualMachineSnapshots from ${NAMESPACE}..."
+oc delete virtualmachinesnapshot --all -n "${NAMESPACE}" --ignore-not-found
+
+# Delete entire vm-demo namespace (removes VMs, DataVolumes, PVCs, pipelines, secrets, services, etc.)
+echo "→ Deleting namespace ${NAMESPACE} (VMs, DataVolumes, PVCs, pipelines, secrets, services)..."
 oc delete namespace "${NAMESPACE}" --ignore-not-found
 echo "   Waiting for namespace deletion..."
 oc wait --for=delete namespace/"${NAMESPACE}" --timeout=180s 2>/dev/null || true
