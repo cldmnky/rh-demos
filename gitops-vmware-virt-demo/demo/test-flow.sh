@@ -57,6 +57,10 @@ sync_argo() {
   local old_finished deadline phase finished health message
 
   log "Syncing ArgoCD Application ${app}"
+  oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+
   old_finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
     -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
 

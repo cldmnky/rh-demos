@@ -98,6 +98,12 @@ function sync_argo() {
 
   comment "Triggering ArgoCD sync for ${app}..."
 
+  # Clear a stale top-level operation if ArgoCD automated sync/selfHeal already started one.
+  oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/operation"}]' \
+    > /dev/null 2>&1 || true
+
   # Record current finishedAt so we can detect when a NEW operation completes.
   local old_finished
   old_finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
