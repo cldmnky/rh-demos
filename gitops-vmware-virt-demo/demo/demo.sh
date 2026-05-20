@@ -46,6 +46,8 @@ ARGOCD_NS="openshift-gitops"
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_ROOT}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
+DEFAULT_GREEN_SNAPSHOT_NAME=$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("green", "diskSnapshot", "name")' "${DEMO_ROOT}/chart/values.yaml")
+DEFAULT_GREEN_SNAPSHOT_NS=$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("green", "diskSnapshot", "namespace")' "${DEMO_ROOT}/chart/values.yaml")
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
@@ -295,15 +297,38 @@ function wait_for_lb_ip() {
   done
 }
 
-function wait_for_green_deleted() {
+function wait_for_green_reset() {
   local deadline=$(( $(date +%s) + 120 ))
+  local parameters selector run_strategy source_name source_namespace
 
-  comment "Waiting for green VM and disk resources to be deleted..."
-  until ! oc get vm demo-vm-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
-        ! oc get datavolume centos10-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
-        ! oc get pvc centos10-green -n "${NAMESPACE}" >/dev/null 2>&1; do
+  comment "Waiting for green to reset: halted, blue traffic, golden-image disk..."
+  while true; do
+    parameters=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.source.helm.parameters}' 2>/dev/null || true)
+    selector=$(oc get service demo-app-lb -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.selector.kubevirt\.io/domain}' 2>/dev/null || true)
+    run_strategy=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
+    source_name=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}' 2>/dev/null || true)
+    source_namespace=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.namespace}' 2>/dev/null || true)
+
+    if [[ -z "${parameters}" && "${selector}" == "demo-vm-blue" && \
+          "${run_strategy}" == "Halted" && \
+          "${source_name}" == "${DEFAULT_GREEN_SNAPSHOT_NAME}" && \
+          "${source_namespace}" == "${DEFAULT_GREEN_SNAPSHOT_NS}" ]]; then
+      break
+    fi
+
+    if ! oc get vm demo-vm-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+       ! oc get datavolume centos10-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+       ! oc get pvc centos10-green -n "${NAMESPACE}" >/dev/null 2>&1; then
+      helm template vm-demo "${DEMO_ROOT}/chart" | oc apply -f - >/dev/null
+    fi
+
     [[ "$(date +%s)" -gt "${deadline}" ]] && {
-      echo "Timed out waiting for green resources to delete"
+      echo "Timed out waiting for green to reset to defaults"
       return 1
     }
     sleep 3
@@ -742,8 +767,7 @@ oc delete pvc centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false"
 comment "Clear all Helm parameter overrides — values.yaml defaults take over (blue=Always, green=Halted, traffic=blue)."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":null}}}}'"
-wait_for_green_deleted
-pe "helm template vm-demo ${DEMO_DIR}/chart | oc apply -f -"
+wait_for_green_reset
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
 wait
