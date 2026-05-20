@@ -7,7 +7,7 @@ metadata:
     app: demo-app
     slot: blue
 spec:
-  runStrategy: Always
+  runStrategy: Halted
   dataVolumeTemplates:
     - metadata:
         name: centos10-blue
