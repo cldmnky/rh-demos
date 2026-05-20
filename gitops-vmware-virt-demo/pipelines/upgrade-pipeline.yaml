@@ -46,7 +46,7 @@ spec:
               CONTENT=$(oc get virtualmachinesnapshot "${VM_SNAPSHOT}" -n vm-demo \
                 -o jsonpath='{.status.virtualMachineSnapshotContentName}')
               VOLUME_SNAPSHOT=$(oc get virtualmachinesnapshotcontent "${CONTENT}" -n vm-demo \
-                -o jsonpath='{.status.volumeBackups[?(@.volumeName=="rootdisk")].volumeSnapshotName}')
+                -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}')
               if [ -z "${VOLUME_SNAPSHOT}" ]; then
                 echo "Could not resolve rootdisk VolumeSnapshot from ${CONTENT}" >&2
                 exit 1

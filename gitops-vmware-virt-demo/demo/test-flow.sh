@@ -258,7 +258,7 @@ assert_green_uses_blue_snapshot() {
   expected_snapshot=$(oc get virtualmachinesnapshot "${vm_snapshot}" -n "${NAMESPACE}" \
     -o jsonpath='{.status.virtualMachineSnapshotContentName}' | \
     xargs -I{} oc get virtualmachinesnapshotcontent {} -n "${NAMESPACE}" \
-      -o jsonpath='{.status.volumeBackups[?(@.volumeName=="rootdisk")].volumeSnapshotName}')
+      -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}')
 
   log "Asserting green VM uses rootdisk VolumeSnapshot ${expected_snapshot} from ${vm_snapshot}"
   parameter_name=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
