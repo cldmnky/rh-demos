@@ -9,13 +9,27 @@
 #   cd gitops-vmware-virt-demo && ./demo/demo.sh
 #
 # Flags:
-#   -n  No wait (auto-advance)
-#   -d  Debug — disable simulated typing
-#   -w  Auto-advance after N seconds
+#   -n         No wait (auto-advance)
+#   -d         Disable simulated typing
+#   -w <secs>  Auto-advance after N seconds
+#   --debug    Trace execution to a temp log; dump log on exit
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 DEMO_DIR="gitops-vmware-virt-demo"
+
+# ── Strip --debug from $@ before demo-magic's getopts sees it ────
+_DEMO_ARGS=()
+for _a in "$@"; do
+  if [[ "$_a" == "--debug" ]]; then
+    # shellcheck source=debug.sh
+    . "${SCRIPT_DIR}/debug.sh"
+  else
+    _DEMO_ARGS+=("$_a")
+  fi
+done
+set -- "${_DEMO_ARGS[@]}"
+unset _DEMO_ARGS _a
 
 ########################
 # include the magic
@@ -34,6 +48,9 @@ METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DE
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
+
+# dbg_step is defined by debug.sh when --debug is given; no-op otherwise.
+command -v dbg_step &>/dev/null || dbg_step() { :; }
 
 ########################
 # helpers
@@ -111,6 +128,7 @@ function wait_for_pr() {
 ##############################################################
 # INTRO
 ##############################################################
+dbg_step "INTRO"
 clear
 redhatsay "Git-Driven VM Lifecycle Demo 🎩
 VMware Admin Edition"
@@ -128,6 +146,7 @@ clear
 ##############################################################
 # SETUP 1 — Namespace + Secrets
 ##############################################################
+dbg_step "SETUP 1 — Secrets"
 say "Setup 1 of 3 — Secrets
 
 The demo uses a single SSH key pair for two purposes:
@@ -177,6 +196,7 @@ clear
 ##############################################################
 # SETUP 2 — MetalLB
 ##############################################################
+dbg_step "SETUP 2 — MetalLB"
 say "Setup 2 of 3 — MetalLB LoadBalancer Pool
 
 In vCenter you'd file an IPAM ticket and wait for NSX configuration.
@@ -196,6 +216,7 @@ clear
 ##############################################################
 # SETUP 3 — ArgoCD
 ##############################################################
+dbg_step "SETUP 3 — ArgoCD"
 say "Setup 3 of 3 — ArgoCD: AppProject + Applications
 
 ArgoCD will watch this GitHub repository and reconcile the cluster
@@ -256,6 +277,7 @@ clear
 ##############################################################
 # SETUP — Wait for VMs
 ##############################################################
+dbg_step "SETUP — waiting for VMs"
 say "Waiting for VMs...
 
 ArgoCD has applied the VirtualMachine manifests from Git.
@@ -294,6 +316,7 @@ clear
 ##############################################################
 # ACT 1 — What's in Git drives the cluster
 ##############################################################
+dbg_step "ACT 1 — What's in Git drives the cluster"
 act 1 "What's in Git drives the cluster"
 
 comment "These two files are everything ArgoCD needs to create and manage both VMs."
@@ -334,6 +357,7 @@ clear
 ##############################################################
 # ACT 2 — Tekton + Ansible Application Deploy
 ##############################################################
+dbg_step "ACT 2 — Tekton + Ansible Application Deploy"
 act 2 "Tekton + Ansible — Application Deploy"
 
 say "We need to install an application on the running VM.
@@ -348,13 +372,16 @@ pe "oc get pipelines.tekton.dev install-app -n ${NAMESPACE}"
 wait
 
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
+dbg_step "ACT 2 — creating install PipelineRun"
 INSTALL_PR=$(oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE} -o name)
 pe "echo ${INSTALL_PR}"
 wait
 clear
 
 comment "Watching the install-app pipeline logs stream in real-time. Every step is a Tekton Task."
+dbg_step "ACT 2 — streaming install-app logs (${INSTALL_PR##*/})"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
+dbg_step "ACT 2 — waiting for install PipelineRun to complete"
 wait_for_pr "${INSTALL_PR##*/}"
 wait
 clear
@@ -371,6 +398,7 @@ clear
 ##############################################################
 # ACT 3 — Blue/Green Upgrade
 ##############################################################
+dbg_step "ACT 3 — Blue/Green Upgrade"
 act 3 "Blue/Green Upgrade — Git commits drive VM power state"
 
 say "Time to deploy v2.0.
@@ -405,13 +433,16 @@ wait
 clear
 
 comment "Triggering the upgrade pipeline directly — no webhook needed."
+dbg_step "ACT 3 — creating upgrade PipelineRun"
 UPGRADE_PR=$(oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n ${NAMESPACE} -o name)
 pe "echo ${UPGRADE_PR}"
 wait
 clear
 
 comment "Streaming upgrade-app logs. ArgoCD syncs are triggered inside the pipeline after each git commit."
+dbg_step "ACT 3 — streaming upgrade-app logs (${UPGRADE_PR##*/})"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix"
+dbg_step "ACT 3 — waiting for upgrade PipelineRun to complete"
 wait_for_pr "${UPGRADE_PR##*/}"
 wait
 clear
@@ -438,6 +469,7 @@ clear
 ##############################################################
 # BONUS — Rollback
 ##############################################################
+dbg_step "BONUS — Rollback"
 redhatsay "Bonus: Rollback is a git revert 🔁
 
 In vCenter: find the snapshot, revert the VM, re-point the load balancer manually.
