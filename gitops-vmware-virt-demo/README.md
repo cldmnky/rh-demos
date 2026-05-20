@@ -18,6 +18,9 @@ The demo is structured in three acts:
 
 Both VMs — blue (active) and green (standby) — are defined in Git **before the demo starts**. Green has `runStrategy: Halted`: it is a powered-off standby that consumes zero CPU or RAM. The upgrade is driven entirely by **Tekton writing Git commits** — ArgoCD is the authoritative controller throughout.
 
+> [SPEAKER NOTE: State the challenge]
+> Traditional HA setups often require resource reservation for standby nodes. Here, we demonstrate a *truly* zero-cost standby. The VM is defined and ready to go, but consumes no compute until needed. This is GitOps-driven configuration management, not a vCenter HA cluster.
+
 ```
 Git repo state at rest:
   base/vm-blue.yaml       → runStrategy: Always    (active, running)
@@ -41,6 +44,9 @@ Rollback: git revert Commit 2 → ArgoCD restores instantly
 | Both VMs defined in Git, green powered off | Standby VM with zero compute cost — vCenter has no concept of "desired off" in code |
 | Upgrade and cutover are Git commits | Full audit trail, PR review, `git revert` for rollback — vCenter task history is read-only |
 | Rollback is Git-driven | Commit traffic back to blue — no manual LB re-pointing |
+
+> [SPEAKER NOTE: Summary]
+> These three points highlight the difference between a declarative, GitOps-driven VM lifecycle and traditional, imperative vCenter operations. We're moving from clicks and task histories to code and immutable audit logs.
 
 ---
 
@@ -221,7 +227,8 @@ oc get route upgrade-trigger -n vm-demo
 
 ### Act 1 — GitOps VM Creation (~5 min)
 
-**Talking point:** *"In VMware, creating a VM means clicking through vCenter wizards and it lives only in vCenter. Here, every VM is a YAML file in Git — including the standby VM we'll use for upgrades later."*
+> [SPEAKER NOTE: Opening]
+> In VMware, creating a VM means clicking through vCenter wizards and it lives only in vCenter. Here, every VM is a YAML file in Git — including the standby VM we'll use for upgrades later. This is **declarative infrastructure** for VMs.
 
 1. Open the GitHub repo. Show `base/vm-blue.yaml` (`runStrategy: Always`), `base/vm-green.yaml` (`runStrategy: Halted`), and `base/service-lb.yaml`.
 2. Open the ArgoCD console. Show the `vm-demo` Application synced, with both VMs and the LB service in the resource tree.
@@ -238,11 +245,13 @@ oc get svc demo-app-lb -n vm-demo
 # demo-app-lb    LoadBalancer   192.168.10.50   80:xxxxx/TCP
 ```
 
-*"The VM already has a real external IP. MetalLB assigned it automatically — no IPAM ticket, no NSX config."*
+> [SPEAKER NOTE: MetalLB]
+> The VM already has a real external IP. MetalLB assigned it automatically — no IPAM ticket, no NSX config. MetalLB is OpenShift's native load balancing solution, replacing complex third-party tools.
 
 ### Act 2 — Tekton + Ansible Application Deployment (~7 min)
 
-**Talking point:** *"Now let's install an application on the VM. In VMware, you'd SSH in manually or use a configuration management tool you'd have to integrate yourself. Here, Tekton pipelines handle that — with Ansible as the task runner."*
+> [SPEAKER NOTE: Installation]
+> Now let's install an application on the VM. In VMware, you'd SSH in manually or use a configuration management tool you'd have to integrate yourself. Here, Tekton pipelines handle that — with Ansible as the task runner. The integration is seamless and automated.
 
 1. Open the Pipelines console. Walk through the `install-app` pipeline graph.
 2. Trigger the pipeline:
@@ -262,7 +271,8 @@ curl http://$LB_IP/
 
 ### Act 3 — Blue/Green Upgrade with Rollback (~8 min)
 
-**Talking point:** *"Now the interesting part. We need to deploy v2.0. Watch what happens when I commit to Git."*
+> [SPEAKER NOTE: Upgrade Trigger]
+> Now the interesting part. We need to deploy v2.0. Watch what happens when I commit to Git. The upgrade is initiated by a simple version bump in Git, which Tekton detects and acts upon.
 
 The upgrade pipeline flow:
 
@@ -332,7 +342,8 @@ curl http://$LB_IP/
 # <h1>Demo App v1.0 — served by demo-vm-blue</h1>
 ```
 
-*"In VMware: find the snapshot, revert, wait for boot, re-point the load balancer manually. Here: Git commits, ArgoCD reconciliation."*
+> [SPEAKER NOTE: Rollback Summary]
+> In VMware: find the snapshot, revert, wait for boot, re-point the load balancer manually. Here: Git commits, ArgoCD reconciliation. The entire process is auditable and repeatable through Git.
 
 ---
 
