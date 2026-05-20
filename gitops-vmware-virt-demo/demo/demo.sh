@@ -40,6 +40,8 @@ cd "${REPO_ROOT}"
 ########################
 # pre-flight: reset state that may be left over from a previous demo run
 ########################
+NAMESPACE="vm-demo"
+ARGOCD_NS="openshift-gitops"
 _preflight_dirty=0
 
 # Clear any runtime Helm parameter overrides left from a previous pipeline/rollback run.
@@ -64,8 +66,6 @@ fi
 ########################
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
-NAMESPACE="vm-demo"
-ARGOCD_NS="openshift-gitops"
 METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_DIR}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
@@ -548,10 +548,18 @@ clear
 
 comment "Step 1 — restart blue while traffic still flows to green. Zero downtime."
 comment "We patch ArgoCD parameters directly — no Git commit needed."
+ROLLBACK_GREEN_SNAPSHOT_NAME=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
+  -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.diskSnapshot.name")].value}' 2>/dev/null || true)
+ROLLBACK_GREEN_SNAPSHOT_NS=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
+  -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.diskSnapshot.namespace")].value}' 2>/dev/null || true)
+ROLLBACK_GREEN_SNAPSHOT_NAME=${ROLLBACK_GREEN_SNAPSHOT_NAME:-centos-stream10-8a1243274fb1}
+ROLLBACK_GREEN_SNAPSHOT_NS=${ROLLBACK_GREEN_SNAPSHOT_NS:-openshift-virtualization-os-images}
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
     {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
     {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+    {\"name\":\"green.diskSnapshot.name\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NAME}\"},
+    {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
   ]}}}}'"
 sync_argo "vm-demo"
@@ -562,7 +570,22 @@ pei "until oc get vmi demo-vm-blue -n ${NAMESPACE} >/dev/null 2>&1; do sleep 3; 
 pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120s"
 wait
 
-comment "Step 2 — roll forward: traffic back to blue, green halts."
+comment "Step 2 — move traffic back to blue and halt green, preserving green's current disk source."
+pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
+    {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
+    {\"name\":\"green.runStrategy\",\"value\":\"Halted\"},
+    {\"name\":\"green.diskSnapshot.name\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NAME}\"},
+    {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
+    {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
+  ]}}}}'"
+sync_argo "vm-demo"
+wait
+
+comment "Step 3 — delete green, then clear overrides so values.yaml recreates it halted from the golden image."
+pe "oc delete vm demo-vm-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
+oc delete datavolume centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
+oc delete pvc centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false"
 comment "Clear all Helm parameter overrides — values.yaml defaults take over (blue=Always, green=Halted, traffic=blue)."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":null}}}}'"

@@ -75,7 +75,7 @@ spec:
                     {\"name\":\"green.diskSnapshot.name\",\"value\":\"${SNAPSHOT}\"},
                     {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"vm-demo\"},
                     {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
-                  ]}}}"
+                  ]}}}}"
 
               # Delete green VM and DataVolume (cascades: VM owner-ref deletes DataVolume).
               # Parameters are already updated above, so any ArgoCD selfHeal that fires
@@ -226,7 +226,7 @@ spec:
                     {\"name\":\"green.diskSnapshot.name\",\"value\":\"${SNAPSHOT}\"},
                     {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"vm-demo\"},
                     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
-                  ]}}}"
+                  ]}}}}"
 
               OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
                 -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
@@ -258,6 +258,9 @@ spec:
   finally:
     - name: patch-stop-green-on-failure
       taskSpec:
+        params:
+          - name: run-id
+            type: string
         steps:
           - name: patch-and-sync
             image: quay.io/openshift/origin-cli:latest
@@ -265,15 +268,20 @@ spec:
               #!/bin/bash
               set -eu
 
+              SNAPSHOT="blue-pre-upgrade-$(params.run-id)"
+
               # Full parameter set for failure rollback:
               #   blue  = Always (keep blue serving traffic — it was never touched)
               #   green = Halted (abort — smoke test failed)
+              #   green disk = blue snapshot (avoid changing DataVolume source while VM exists)
               #   traffic = blue (ensure LB stays on blue)
               oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
                 --patch '{
                   "spec":{"source":{"helm":{"parameters":[
                     {"name":"blue.runStrategy","value":"Always"},
                     {"name":"green.runStrategy","value":"Halted"},
+                    {"name":"green.diskSnapshot.name","value":"'"${SNAPSHOT}"'"},
+                    {"name":"green.diskSnapshot.namespace","value":"vm-demo"},
                     {"name":"traffic.activeSlot","value":"blue"}
                   ]}}}}'
 
@@ -292,6 +300,9 @@ spec:
                 sleep 5
               done
               echo "ArgoCD synced — green halted, blue still running, users unaffected"
+        params:
+          - name: run-id
+            value: $(params.run-id)
       when:
         - input: "$(tasks.smoke-test.status)"
           operator: in
