@@ -48,7 +48,7 @@ commit_and_push_if_changed() {
   fi
 
   run git -C "${REPO_ROOT}" commit -m "${message}"
-  run git -C "${REPO_ROOT}" pull --rebase origin main
+  run git -C "${REPO_ROOT}" pull --rebase --autostash origin main
   run git -C "${REPO_ROOT}" push origin main
 }
 

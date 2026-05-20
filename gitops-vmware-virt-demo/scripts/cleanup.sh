@@ -80,7 +80,7 @@ if [[ "${RESET_GIT}" == "true" ]]; then
 
   if ! git -C "${REPO_ROOT}" diff --cached --quiet; then
     git -C "${REPO_ROOT}" commit -m "chore: reset demo state to initial"
-    git -C "${REPO_ROOT}" pull --rebase origin main && git -C "${REPO_ROOT}" push origin main
+    git -C "${REPO_ROOT}" pull --rebase --autostash origin main && git -C "${REPO_ROOT}" push origin main
     echo "   Git state reset and pushed."
   else
     echo "   Git state already clean — nothing to reset."
