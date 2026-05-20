@@ -5,4 +5,4 @@ metadata:
   name: app-version
   namespace: vm-demo
 data:
-  version: "v1.0"
+  version: "v2.0"
