@@ -132,12 +132,12 @@ oc get volumesnapshotclass
 
 ODF (OpenShift Data Foundation) or any CSI driver with RWX is suitable.
 
-### RHEL 9 Golden Image
+### CentOS Stream 10 Golden Image
 
-The SSP operator imports RHEL 9 golden images via `DataImportCron`. Verify before the demo:
+The SSP operator imports CentOS Stream 10 golden images via `DataImportCron`. Verify before the demo:
 
 ```bash
-oc get datasource rhel9 -n openshift-virtualization-os-images \
+oc get datasource centos-stream10 -n openshift-virtualization-os-images \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
 # Must return: True
 ```
@@ -145,9 +145,9 @@ oc get datasource rhel9 -n openshift-virtualization-os-images \
 In a disconnected environment, mirror the image manually:
 
 ```bash
-virtctl image-upload dv rhel9-golden \
+virtctl image-upload dv centos-stream10-golden \
   --size=30Gi \
-  --image-path=/path/to/rhel9.qcow2 \
+  --image-path=/path/to/centos-stream10.qcow2 \
   --storage-class=<your-rwx-sc> \
   -n openshift-virtualization-os-images
 ```
@@ -382,8 +382,8 @@ oc get csv -n openshift-pipelines | grep -E "Succeeded|Failed"
 # 2. Existing MetalLB pool available (not created by demo)
 oc get ipaddresspool metallb -n metallb-system
 
-# 3. RHEL9 boot source ready
-oc get datasource rhel9 -n openshift-virtualization-os-images \
+# 3. CentOS Stream 10 boot source ready
+oc get datasource centos-stream10 -n openshift-virtualization-os-images \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
 
 # 4. VolumeSnapshotClass present

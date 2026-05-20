@@ -340,7 +340,7 @@ dbg_step "SETUP — waiting for VMs"
 say "Waiting for VMs...
 
 ArgoCD has applied the VirtualMachine manifests from Git.
-CDI is now cloning the RHEL 9 golden image into two DataVolumes.
+CDI is now cloning the CentOS Stream 10 golden image into two DataVolumes.
 
 Blue will come up Running.
 Green stays Halted — zero CPU, zero RAM consumed." 226
