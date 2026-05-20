@@ -7,7 +7,7 @@ metadata:
     app: demo-app
     slot: green
 spec:
-  runStrategy: Halted  # powered off — zero compute cost; powered on by Tekton during upgrade
+  runStrategy: Halted # powered off — zero compute cost; powered on by Tekton during upgrade
   dataVolumeTemplates:
     - metadata:
         name: centos10-green
