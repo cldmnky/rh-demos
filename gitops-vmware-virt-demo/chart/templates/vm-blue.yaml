@@ -1,24 +1,24 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: demo-vm-green
+  name: demo-vm-blue
   namespace: vm-demo
   labels:
     app: demo-app
-    slot: green
+    slot: blue
 spec:
-  runStrategy: Halted # powered off — zero compute cost; powered on by Tekton during upgrade
+  runStrategy: {{ .Values.blue.runStrategy }}
   dataVolumeTemplates:
     - metadata:
-        name: centos10-green
+        name: centos10-blue
       spec:
         storage:
           accessModes:
             - ReadWriteMany
           resources:
             requests:
-              storage: 30Gi
-          storageClassName: ocs-storagecluster-ceph-rbd-virtualization
+              storage: {{ .Values.storage.size }}
+          storageClassName: {{ .Values.storage.storageClass }}
         source:
           snapshot:
             name: centos-stream10-8a1243274fb1
@@ -27,7 +27,7 @@ spec:
     metadata:
       labels:
         app: demo-app
-        kubevirt.io/domain: demo-vm-green
+        kubevirt.io/domain: demo-vm-blue
     spec:
       domain:
         resources:
@@ -52,7 +52,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: centos10-green
+            name: centos10-blue
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:

@@ -1,0 +1,20 @@
+# Reset/initial state — this is what the demo starts with.
+# The upgrade pipeline overrides these at runtime via ArgoCD spec.source.helm.parameters.
+# No Git commits needed for VM state changes during the demo.
+
+blue:
+  runStrategy: Always
+
+green:
+  runStrategy: Halted
+  diskSnapshot:
+    # Initial value: OS golden image. Overridden by the pipeline to the blue snapshot name.
+    name: centos-stream10-8a1243274fb1
+    namespace: openshift-virtualization-os-images
+
+traffic:
+  activeSlot: blue
+
+storage:
+  storageClass: ocs-storagecluster-ceph-rbd-virtualization
+  size: 30Gi

@@ -5,16 +5,11 @@ metadata:
   namespace: vm-demo
 spec:
   params:
-    - name: git-repo-url
-      description: "SSH URL of the demo Git repository"
-      default: "git@github.com:cldmnky/rh-demos.git"
     - name: lb-ip-url
       description: "URL of the MetalLB LoadBalancer (http://<LB_IP>)"
     - name: run-id
-      description: "Unique identifier for this upgrade run (e.g. pipeline run name)"
-  workspaces:
-    - name: ssh-key
-      description: "SSH private key secret (key: id_rsa)"
+      description: "Unique identifier for this upgrade run — defaults to PipelineRun name"
+      default: "$(context.pipelineRun.name)"
   tasks:
     # [1] Safety net: snapshot blue before touching anything
     - name: snapshot-blue
@@ -47,69 +42,85 @@ spec:
         - name: run-id
           value: $(params.run-id)
 
-    # [2] Git commit: start green VM
-    - name: git-start-green
+    # [2] Patch ArgoCD: start green from blue snapshot.
+    # Deletes existing green VM/DataVolume first so the new disk source takes effect.
+    # Sets ALL parameters for the start-green phase to avoid partial-list issues.
+    - name: patch-start-green
       runAfter:
         - snapshot-blue
-      taskRef:
-        kind: Task
-        name: git-commit-vm-state
-      params:
-        - name: vm-file
-          value: vm-green.yaml
-        - name: run-strategy
-          value: Always
-        - name: commit-message
-          value: "[upgrade-pipeline] start green VM for upgrade run $(params.run-id)"
-        - name: git-repo-url
-          value: $(params.git-repo-url)
-      workspaces:
-        - name: ssh-key
-          workspace: ssh-key
-
-    # [3] Trigger ArgoCD sync so vm-green starts immediately (no polling delay)
-    - name: sync-argo-start-green
-      runAfter:
-        - git-start-green
       taskSpec:
         params:
-          - name: git-sha
+          - name: run-id
             type: string
         steps:
-          - name: sync
+          - name: patch-and-sync
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set -eu
-              SHA="$(params.git-sha)"
-              echo "Waiting for ArgoCD to sync vm-demo to ${SHA}..."
-              # Hard refresh so ArgoCD fetches the new commit immediately
-              oc annotate application.argoproj.io vm-demo -n vm-demo \
-                argocd.argoproj.io/refresh=hard --overwrite
-              # Trigger sync operation
-              oc patch application.argoproj.io vm-demo -n vm-demo \
-                --type merge \
+
+              SNAPSHOT="blue-pre-upgrade-$(params.run-id)"
+
+              # Patch Application parameters FIRST (so any ArgoCD selfHeal uses the new values).
+              # Full parameter set for start-green phase:
+              #   blue  = Always (keep blue serving traffic while green prepares)
+              #   green = Always (start green)
+              #   green disk = blue snapshot
+              #   traffic = blue (not cut over yet)
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+                --patch "{
+                  \"spec\":{\"source\":{\"helm\":{\"parameters\":[
+                    {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.diskSnapshot.name\",\"value\":\"${SNAPSHOT}\"},
+                    {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"vm-demo\"},
+                    {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
+                  ]}}}"
+
+              # Delete green VM and DataVolume (cascades: VM owner-ref deletes DataVolume).
+              # Parameters are already updated above, so any ArgoCD selfHeal that fires
+              # during deletion will recreate green with the new snapshot.
+              oc delete vm demo-vm-green -n vm-demo --ignore-not-found --wait=false
+              oc delete datavolume centos10-green -n vm-demo --ignore-not-found --wait=false
+              oc delete pvc centos10-green -n vm-demo --ignore-not-found --wait=false
+
+              echo "Waiting for green VM and DataVolume to be fully deleted..."
+              DEADLINE=$(( $(date +%s) + 120 ))
+              until ! oc get vm demo-vm-green -n vm-demo >/dev/null 2>&1 && \
+                    ! oc get datavolume centos10-green -n vm-demo >/dev/null 2>&1; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green deletion"; exit 1; }
+                sleep 3
+              done
+              echo "Green VM and DataVolume deleted."
+
+              # Record current operationState.finishedAt to detect when a NEW sync completes.
+              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
+                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
+
+              # Trigger sync — ArgoCD renders chart with new parameters → creates green from snapshot.
+              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
                 --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-              # Wait until ArgoCD has synced THIS specific revision
+
+              echo "Waiting for ArgoCD sync to complete (green VM starting from ${SNAPSHOT})..."
               DEADLINE=$(( $(date +%s) + 300 ))
-              until [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
-                  -o jsonpath='{.status.sync.revision}')" = "${SHA}" ] && \
-                    [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
-                  -o jsonpath='{.status.sync.status}')" = "Synced" ]; do
+              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
+                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
                 [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
                 echo -n '.'
                 sleep 5
               done
               echo ""
-              echo "ArgoCD synced vm-demo to ${SHA} — green VM start committed"
+              echo "ArgoCD synced — green VM created from ${SNAPSHOT}"
       params:
-        - name: git-sha
-          value: $(tasks.git-start-green.results.git-sha)
+        - name: run-id
+          value: $(params.run-id)
 
-    # [4] Wait for green VMI to reach Running phase
+    # [3] Wait for green VMI to reach Running phase
     - name: wait-for-green
       runAfter:
-        - sync-argo-start-green
+        - patch-start-green
       taskRef:
         resolver: hub
         params:
@@ -184,84 +195,104 @@ spec:
         - name: url
           value: http://demo-vm-green-http.vm-demo.svc.cluster.local/health
 
-    # [6-PASS] Cutover: traffic → green, blue → Halted
-    - name: git-cutover
+    # [6-PASS] Cutover: traffic → green, blue → Halted.
+    # Full parameter set for cutover phase — must keep green=Always and disk snapshot.
+    - name: patch-cutover
       runAfter:
         - smoke-test
-      taskRef:
-        kind: Task
-        name: git-commit-cutover
-      params:
-        - name: active-slot
-          value: green
-        - name: halted-vm-file
-          value: vm-blue.yaml
-        - name: commit-message
-          value: "[upgrade-pipeline] cutover to green — smoke test passed (run $(params.run-id))"
-        - name: git-repo-url
-          value: $(params.git-repo-url)
-      workspaces:
-        - name: ssh-key
-          workspace: ssh-key
-
-    # [7] Trigger ArgoCD sync after cutover commit (traffic → green, blue → Halted)
-    - name: sync-argo-cutover
-      runAfter:
-        - git-cutover
       taskSpec:
         params:
-          - name: git-sha
+          - name: run-id
             type: string
         steps:
-          - name: sync
+          - name: patch-and-sync
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set -eu
-              SHA="$(params.git-sha)"
-              echo "Waiting for ArgoCD to sync vm-demo to ${SHA}..."
-              # Hard refresh so ArgoCD fetches the new commit immediately
-              oc annotate application.argoproj.io vm-demo -n vm-demo \
-                argocd.argoproj.io/refresh=hard --overwrite
-              # Trigger sync operation
-              oc patch application.argoproj.io vm-demo -n vm-demo \
-                --type merge \
+
+              SNAPSHOT="blue-pre-upgrade-$(params.run-id)"
+
+              # Full parameter set for cutover phase:
+              #   blue  = Halted (powered off — no longer serving traffic)
+              #   green = Always (serving traffic)
+              #   green disk = blue snapshot (unchanged from start-green)
+              #   traffic = green (LoadBalancer routes to green)
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+                --patch "{
+                  \"spec\":{\"source\":{\"helm\":{\"parameters\":[
+                    {\"name\":\"blue.runStrategy\",\"value\":\"Halted\"},
+                    {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.diskSnapshot.name\",\"value\":\"${SNAPSHOT}\"},
+                    {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"vm-demo\"},
+                    {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
+                  ]}}}"
+
+              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
+                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
+
+              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
                 --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-              # Wait until ArgoCD has synced THIS specific revision
+
+              echo "Waiting for ArgoCD sync to complete (traffic → green, blue → Halted)..."
               DEADLINE=$(( $(date +%s) + 300 ))
-              until [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
-                  -o jsonpath='{.status.sync.revision}')" = "${SHA}" ] && \
-                    [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
-                  -o jsonpath='{.status.sync.status}')" = "Synced" ]; do
+              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
+                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
                 [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
                 echo -n '.'
                 sleep 5
               done
               echo ""
-              echo "ArgoCD synced vm-demo to ${SHA} — cutover complete, traffic on green"
+              echo "ArgoCD synced — cutover complete, traffic on green, blue halted"
       params:
-        - name: git-sha
-          value: $(tasks.git-cutover.results.git-sha)
+        - name: run-id
+          value: $(params.run-id)
 
-  # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
+  workspaces:
+    - name: ssh-key
+      description: "SSH private key secret (key: id_rsa)"
+
+  # [6-FAIL] If smoke-test fails, halt green and leave blue untouched.
   finally:
-    - name: git-stop-green-on-failure
-      taskRef:
-        kind: Task
-        name: git-commit-vm-state
+    - name: patch-stop-green-on-failure
+      taskSpec:
+        steps:
+          - name: patch-and-sync
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+
+              # Full parameter set for failure rollback:
+              #   blue  = Always (keep blue serving traffic — it was never touched)
+              #   green = Halted (abort — smoke test failed)
+              #   traffic = blue (ensure LB stays on blue)
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+                --patch '{
+                  "spec":{"source":{"helm":{"parameters":[
+                    {"name":"blue.runStrategy","value":"Always"},
+                    {"name":"green.runStrategy","value":"Halted"},
+                    {"name":"traffic.activeSlot","value":"blue"}
+                  ]}}}}'
+
+              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
+                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
+
+              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
+                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
+
+              DEADLINE=$(( $(date +%s) + 300 ))
+              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
+                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+                sleep 5
+              done
+              echo "ArgoCD synced — green halted, blue still running, users unaffected"
       when:
         - input: "$(tasks.smoke-test.status)"
           operator: in
           values: ["Failed"]
-      params:
-        - name: vm-file
-          value: vm-green.yaml
-        - name: run-strategy
-          value: Halted
-        - name: commit-message
-          value: "[upgrade-pipeline] smoke test failed — halting green (run $(params.run-id))"
-        - name: git-repo-url
-          value: $(params.git-repo-url)
-      workspaces:
-        - name: ssh-key
-          workspace: ssh-key

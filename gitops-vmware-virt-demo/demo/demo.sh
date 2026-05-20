@@ -42,38 +42,21 @@ cd "${REPO_ROOT}"
 ########################
 _preflight_dirty=0
 
+# Clear any runtime Helm parameter overrides left from a previous pipeline/rollback run.
+# (This is always safe — parameters=null falls back to values.yaml defaults.)
+oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":null}}}}' >/dev/null 2>&1 || true
+
 if ! grep -q 'version: "v1.0"' "${DEMO_DIR}/pipelines/app-version.yaml"; then
   echo "⚠️  app-version.yaml is not v1.0 — resetting."
   sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_DIR}/pipelines/app-version.yaml"
   _preflight_dirty=1
 fi
 
-if ! grep -q 'runStrategy: Halted' "${DEMO_DIR}/base/vm-green.yaml"; then
-  echo "⚠️  vm-green.yaml is not Halted — resetting."
-  yq e '.spec.runStrategy = "Halted"' -i "${DEMO_DIR}/base/vm-green.yaml"
-  _preflight_dirty=1
-fi
-
-if ! grep -q 'runStrategy: Always' "${DEMO_DIR}/base/vm-blue.yaml"; then
-  echo "⚠️  vm-blue.yaml is not Always — resetting."
-  yq e '.spec.runStrategy = "Always"' -i "${DEMO_DIR}/base/vm-blue.yaml"
-  _preflight_dirty=1
-fi
-
-if ! grep -q 'demo-vm-blue' "${DEMO_DIR}/base/service-lb.yaml"; then
-  echo "⚠️  service-lb.yaml selector is not demo-vm-blue — resetting."
-  yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i "${DEMO_DIR}/base/service-lb.yaml"
-  _preflight_dirty=1
-fi
-
 if [[ $_preflight_dirty -eq 1 ]]; then
-  git pull origin main
-  git add "${DEMO_DIR}/pipelines/app-version.yaml" \
-          "${DEMO_DIR}/base/vm-green.yaml" \
-          "${DEMO_DIR}/base/vm-blue.yaml" \
-          "${DEMO_DIR}/base/service-lb.yaml"
-  git commit -m "chore: reset demo state to v1.0 / blue before demo"
-  git push origin main
+  git -C "${REPO_ROOT}" add "${DEMO_DIR}/pipelines/app-version.yaml"
+  git -C "${REPO_ROOT}" commit -m "chore: reset demo state to v1.0 before demo"
+  git -C "${REPO_ROOT}" pull --rebase origin main && git -C "${REPO_ROOT}" push origin main
 fi
 
 ########################
@@ -83,7 +66,7 @@ fi
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
-METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_DIR}/base/service-lb.yaml")
+METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_DIR}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
@@ -112,6 +95,37 @@ function comment() {
 
 function sync_argo() {
   local app="$1"
+
+  comment "Triggering ArgoCD sync for ${app}..."
+
+  # Record current finishedAt so we can detect when a NEW operation completes.
+  local old_finished
+  old_finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
+
+  oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    --type merge \
+    --patch '{"operation":{"initiatedBy":{"username":"demo"},"sync":{"prune":true}}}' \
+    > /dev/null 2>&1
+
+  local deadline=$(( $(date +%s) + 300 ))
+  until [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${old_finished}" ]] && \
+        [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
+    [[ "$(date +%s)" -gt "${deadline}" ]] && { echo "⏱️  Timeout waiting for ${app} sync"; return 1; }
+    sleep 3
+  done
+
+  local health
+  health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.health.status}' 2>/dev/null)
+  echo "✅ ${app}: Synced / ${health}"
+}
+
+# SHA-based sync wait — use for Git-committed changes (e.g. vm-demo-infra after push).
+function sync_argo_git() {
+  local app="$1"
   local revision
   revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
 
@@ -121,7 +135,6 @@ function sync_argo() {
     --patch '{"operation":{"initiatedBy":{"username":"demo"},"sync":{"prune":true}}}' \
     > /dev/null 2>&1
 
-  # Wait for ArgoCD to sync this exact revision (not a stale Synced from before the push)
   until [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.sync.revision}' 2>/dev/null)" == "${revision}" ]] && \
     [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
@@ -129,20 +142,10 @@ function sync_argo() {
     sleep 3
   done
 
-  # vm-demo is Suspended when vm-green is Halted — accept Healthy or Suspended
-  until oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.health.status}' 2>/dev/null | grep -qE "^(Healthy|Suspended)$"; do
-    sleep 3
-  done
-
   local health
   health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.health.status}' 2>/dev/null)
-  if [[ "$health" == "Suspended" ]]; then
-    echo "✅ ${app}: Synced @ ${revision:0:7} / Suspended (vm-green is Halted — expected)"
-  else
-    echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
-  fi
+    -o jsonpath='{.status.health.status}' 2>/dev/null)
+  echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
 }
 
 function wait_for_pr() {
@@ -257,7 +260,7 @@ comment "Verify the existing MetalLB pool. The demo does not create IPAddressPoo
 pe "oc get ipaddresspool ${METALLB_POOL} -n metallb-system"
 wait
 comment "The LoadBalancer service requests that existing pool via annotation."
-pe "grep 'metallb.universe.tf/address-pool' ${DEMO_DIR}/base/service-lb.yaml"
+pe "grep 'metallb.universe.tf/address-pool' ${DEMO_DIR}/chart/templates/service-lb.yaml"
 wait
 clear
 
@@ -296,8 +299,8 @@ pe "oc apply -f ${DEMO_DIR}/argocd/rbac.yaml"
 wait
 clear
 
-comment "Application 1: VMs and services — ArgoCD syncs gitops-vmware-virt-demo/base/ to the cluster."
-comment "This Application lives in the vm-demo namespace — not in openshift-gitops."
+comment "Application 1: VMs and services — ArgoCD renders a Helm chart from gitops-vmware-virt-demo/chart/."
+comment "Runtime Helm parameters override values without Git commits — used by the upgrade pipeline."
 pe "cat ${DEMO_DIR}/argocd/application.yaml"
 wait
 pe "oc apply -f ${DEMO_DIR}/argocd/application.yaml -n ${NAMESPACE}"
@@ -318,7 +321,7 @@ wait
 
 pe "oc get applications.argoproj.io -n ${NAMESPACE}"
 sync_argo "vm-demo"
-sync_argo "vm-demo-infra"
+sync_argo_git "vm-demo-infra"
 dbg_run oc get applications.argoproj.io -n ${NAMESPACE} -o wide
 dbg_run oc get all -n ${NAMESPACE}
 wait
@@ -371,19 +374,23 @@ clear
 dbg_step "ACT 1 — What's in Git drives the cluster"
 act 1 "What's in Git drives the cluster"
 
-comment "These two files are everything ArgoCD needs to create and manage both VMs."
-pe "cat ${DEMO_DIR}/base/vm-blue.yaml"
+comment "This Helm chart is everything ArgoCD needs to create and manage both VMs."
+comment "values.yaml is the reset state. The pipeline overrides values at runtime — no Git commits."
+pe "cat ${DEMO_DIR}/chart/values.yaml"
 wait
 clear
 
-pe "cat ${DEMO_DIR}/base/vm-green.yaml"
+pe "cat ${DEMO_DIR}/chart/templates/vm-blue.yaml"
 wait
 clear
 
-say "vm-green has runStrategy: Halted.
-In vCenter there is no concept of 'desired powered-off state' expressed as code.
-Here it's one field in a YAML file — and ArgoCD enforces it continuously.
-Edit that field, push to Git, ArgoCD starts the VM. That's it." 245
+pe "cat ${DEMO_DIR}/chart/templates/vm-green.yaml"
+wait
+clear
+
+say "vm-green has runStrategy: Halted in values.yaml.
+The upgrade pipeline overrides it to Always — directly on the ArgoCD Application.
+No Git commit. ArgoCD re-renders the chart and starts the VM immediately." 245
 wait
 
 comment "ArgoCD Application status — lives in vm-demo namespace, watched by the openshift-gitops instance."
@@ -464,16 +471,15 @@ Watch what happens." 226
 wait
 clear
 
-say "The upgrade pipeline — every step is a Git commit or waits on one:
+say "The upgrade pipeline — one Git commit triggers it; everything else goes direct to ArgoCD:
 
   [1] snapshot-blue      VirtualMachineSnapshot — safety net before touching anything
-  [2] git-start-green    Commit: vm-green runStrategy → Always
-  [3] sync-argo          ArgoCD sync triggered → green VM starts immediately
-  [4] wait-for-green     Polls VMI until Running
-  [5] ansible-upgrade    Ansible deploys v2.0 onto green
-  [6] smoke-test         curl /health directly on green
-  [7-PASS] git-cutover   Commit: service selector → green, vm-blue → Halted → ArgoCD sync
-  [7-FAIL] git-stop      Commit: vm-green → Halted  (blue untouched, users unaffected)" 117
+  [2] patch-start-green  Patch ArgoCD params: green=Always, disk=blue-snapshot → sync
+  [3] wait-for-green     Polls VMI until Running
+  [4] ansible-upgrade    Ansible deploys v2.0 onto green (started from blue clone)
+  [5] smoke-test         curl /health directly on green
+  [6-PASS] patch-cutover Patch ArgoCD params: traffic=green, blue=Halted → sync
+  [6-FAIL] patch-stop    Patch ArgoCD params: green=Halted (blue untouched, users unaffected)" 117
 wait
 clear
 
@@ -484,7 +490,7 @@ wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'bump app version to v2.0'"
 pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
-sync_argo "vm-demo-infra"
+sync_argo_git "vm-demo-infra"
 wait
 clear
 
@@ -509,8 +515,9 @@ dbg_run oc get virtualmachinesnapshot -n ${NAMESPACE}
 wait
 clear
 
-comment "What did Tekton commit to Git during the upgrade?"
-pe "git -C ${REPO_ROOT} log --oneline -5 -- ${DEMO_DIR}/base/"
+comment "What did the pipeline change? No Git commits — it updated ArgoCD parameters directly."
+pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
+  -o jsonpath='{.spec.source.helm.parameters}' | python3 -m json.tool"
 wait
 
 comment "Traffic has moved. Service selector updated by Tekton's git commit → ArgoCD reconcile."
@@ -522,9 +529,9 @@ wait
 pe "curl -s http://${LB_IP}/"
 wait
 
-say "Two Git commits — written by Tekton, not a human.
-Same external IP. Zero downtime. Full rollout in git log.
-Blue is Halted: zero compute consumed, still in Git, one commit from coming back. 🎩" 82
+say "One Git commit — the version bump — triggered the pipeline.
+The pipeline patched ArgoCD parameters directly: no extra Git commits.
+Same external IP. Zero downtime. Traffic on green. Blue halted: zero compute. 🎩" 82
 wait
 clear
 
@@ -532,18 +539,21 @@ clear
 # BONUS — Rollback
 ##############################################################
 dbg_step "BONUS — Rollback"
-redhatsay "Bonus: Rollback is two Git commits 🔁
+redhatsay "Bonus: Rollback is two ArgoCD patches 🔁
 
 In vCenter: find the snapshot, revert the VM, re-point the load balancer manually.
-Here: roll forward in Git. ArgoCD reconciles. Done."
+Here: patch ArgoCD parameters. No Git commits. ArgoCD reconciles. Done."
 wait
 clear
 
 comment "Step 1 — restart blue while traffic still flows to green. Zero downtime."
-pe "yq e '.spec.runStrategy = \"Always\"' -i ${DEMO_DIR}/base/vm-blue.yaml"
-pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-blue.yaml"
-pe "git -C ${REPO_ROOT} commit -m 'rollback: restart blue standby'"
-pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
+comment "We patch ArgoCD parameters directly — no Git commit needed."
+pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
+    {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
+    {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+    {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
+  ]}}}}'"
 sync_argo "vm-demo"
 wait
 
@@ -553,11 +563,9 @@ pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120
 wait
 
 comment "Step 2 — roll forward: traffic back to blue, green halts."
-pe "yq e '.spec.selector[\"kubevirt.io/domain\"] = \"demo-vm-blue\"' -i ${DEMO_DIR}/base/service-lb.yaml"
-pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
-pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/service-lb.yaml ${DEMO_DIR}/base/vm-green.yaml"
-pe "git -C ${REPO_ROOT} commit -m 'rollback: traffic back to blue, halt green'"
-pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
+comment "Clear all Helm parameter overrides — values.yaml defaults take over (blue=Always, green=Halted, traffic=blue)."
+pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":null}}}}'"
 sync_argo "vm-demo"
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
@@ -571,10 +579,10 @@ clear
 ##############################################################
 echo "VMware / vCenter                       OpenShift + GitOps
 ───────────────────────────────────    ──────────────────────────────────────
-VM defined in vCenter GUI              VM defined in Git (YAML, versioned)
+VM defined in vCenter GUI              VM defined in Helm chart (versioned)
 Standby = powered-off clone            Standby = runStrategy: Halted (free)
 Upgrade = wizard + manual LB           Upgrade = Git commit + Tekton pipeline
-Rollback = vCenter snapshot revert     Rollback = git revert + push
+Rollback = vCenter snapshot revert     Rollback = ArgoCD param patch (no commit)
 Audit trail = vCenter task history     Audit trail = git log + Tekton logs
 No PR review for VM changes            Full PR review + approval workflow
 NSX / F5 / vRA = extra licenses        MetalLB + Tekton — included in OCP" \

@@ -8,13 +8,16 @@ spec:
   source:
     repoURL: https://github.com/cldmnky/rh-demos
     targetRevision: main
-    path: gitops-vmware-virt-demo/base
+    path: gitops-vmware-virt-demo/chart
+    # helm.parameters are patched at runtime by the upgrade pipeline and demo.sh
+    # to drive VM state (runStrategy, diskSnapshot, traffic slot) without Git commits.
+    helm: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: vm-demo
   syncPolicy:
     automated:
-      prune: true      # removes resources deleted from Git
+      prune: true      # removes resources deleted from the chart
       selfHeal: true   # reverts out-of-band cluster changes
     syncOptions:
       - CreateNamespace=true
@@ -23,3 +26,4 @@ spec:
       kind: VirtualMachine
       jsonPointers:
         - /spec/template/spec/architecture
+        - /spec/dataVolumeTemplates/0/spec/storage/volumeMode

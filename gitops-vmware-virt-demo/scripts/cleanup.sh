@@ -19,6 +19,12 @@ DEMO_ROOT="${REPO_ROOT}/${DEMO_DIR}"
 
 echo "🧹 Cleaning up demo resources..."
 
+# Clear any runtime Helm parameter overrides from the ArgoCD Application before deleting it.
+# This ensures the Application is in a clean state for inspection or re-use.
+echo "→ Clearing ArgoCD Helm parameter overrides..."
+oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":null}}}}' 2>/dev/null || true
+
 # Delete ArgoCD Applications (in vm-demo namespace — apps-in-any-namespace)
 echo "→ Removing ArgoCD Applications from ${NAMESPACE} namespace..."
 oc delete application vm-demo vm-demo-infra -n "${NAMESPACE}" --ignore-not-found
@@ -69,25 +75,12 @@ if [[ "${RESET_GIT}" == "true" ]]; then
     echo "   Reverted app-version.yaml to v1.0"
   fi
 
-  # Reset vm-blue.yaml to initial state (runStrategy: Always — it should already be there)
-  # Reset vm-green.yaml to Halted
-  yq e '.spec.runStrategy = "Halted"' -i "${REPO_ROOT}/${DEMO_DIR}/base/vm-green.yaml" 2>/dev/null || true
-  yq e '.spec.runStrategy = "Always"' -i "${REPO_ROOT}/${DEMO_DIR}/base/vm-blue.yaml" 2>/dev/null || true
-
-  # Restore service selector to blue
-  if command -v yq &>/dev/null; then
-    yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i "${REPO_ROOT}/${DEMO_DIR}/base/service-lb.yaml" 2>/dev/null || true
-  fi
-
   git -C "${REPO_ROOT}" add \
-    "${DEMO_DIR}/pipelines/app-version.yaml" \
-    "${DEMO_DIR}/base/vm-blue.yaml" \
-    "${DEMO_DIR}/base/vm-green.yaml" \
-    "${DEMO_DIR}/base/service-lb.yaml" 2>/dev/null || true
+    "${DEMO_DIR}/pipelines/app-version.yaml" 2>/dev/null || true
 
   if ! git -C "${REPO_ROOT}" diff --cached --quiet; then
     git -C "${REPO_ROOT}" commit -m "chore: reset demo state to initial"
-    git -C "${REPO_ROOT}" push origin main
+    git -C "${REPO_ROOT}" pull --rebase origin main && git -C "${REPO_ROOT}" push origin main
     echo "   Git state reset and pushed."
   else
     echo "   Git state already clean — nothing to reset."

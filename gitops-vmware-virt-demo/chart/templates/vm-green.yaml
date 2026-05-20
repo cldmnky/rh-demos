@@ -1,33 +1,35 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: demo-vm-blue
+  name: demo-vm-green
   namespace: vm-demo
   labels:
     app: demo-app
-    slot: blue
+    slot: green
 spec:
-  runStrategy: Always
+  # Halted at rest — zero compute cost. Pipeline overrides to Always during upgrade.
+  runStrategy: {{ .Values.green.runStrategy }}
   dataVolumeTemplates:
     - metadata:
-        name: centos10-blue
+        name: centos10-green
       spec:
         storage:
           accessModes:
             - ReadWriteMany
           resources:
             requests:
-              storage: 30Gi
-          storageClassName: ocs-storagecluster-ceph-rbd-virtualization
+              storage: {{ .Values.storage.size }}
+          storageClassName: {{ .Values.storage.storageClass }}
         source:
           snapshot:
-            name: centos-stream10-8a1243274fb1
-            namespace: openshift-virtualization-os-images
+            # Pipeline overrides this to the blue pre-upgrade snapshot for each run.
+            name: {{ .Values.green.diskSnapshot.name }}
+            namespace: {{ .Values.green.diskSnapshot.namespace }}
   template:
     metadata:
       labels:
         app: demo-app
-        kubevirt.io/domain: demo-vm-blue
+        kubevirt.io/domain: demo-vm-green
     spec:
       domain:
         resources:
@@ -52,7 +54,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: centos10-blue
+            name: centos10-green
         - name: cloudinitdisk
           cloudInitNoCloud:
             secretRef:

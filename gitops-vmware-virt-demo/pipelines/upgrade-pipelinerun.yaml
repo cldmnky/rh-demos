@@ -7,12 +7,8 @@ spec:
   pipelineRef:
     name: upgrade-app
   params:
-    - name: git-repo-url
-      value: git@github.com:cldmnky/rh-demos.git
     - name: lb-ip-url
       value: http://demo-app-lb.vm-demo.svc.cluster.local
-    - name: run-id
-      value: demo-run
   workspaces:
     - name: ssh-key
       secret:
