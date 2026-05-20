@@ -214,10 +214,16 @@ wait_for_green_deleted() {
 }
 
 assert_green_uses_blue_snapshot() {
-  local expected_snapshot="$1"
+  local vm_snapshot="$1"
+  local expected_snapshot
   local source_name source_namespace parameter_name parameter_namespace
 
-  log "Asserting green VM uses blue snapshot ${expected_snapshot}"
+  expected_snapshot=$(oc get virtualmachinesnapshot "${vm_snapshot}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.virtualMachineSnapshotContentName}' | \
+    xargs -I{} oc get virtualmachinesnapshotcontent {} -n "${NAMESPACE}" \
+      -o jsonpath='{.status.volumeBackups[?(@.volumeName=="rootdisk")].volumeSnapshotName}')
+
+  log "Asserting green VM uses rootdisk VolumeSnapshot ${expected_snapshot} from ${vm_snapshot}"
   parameter_name=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
     -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.diskSnapshot.name")].value}')
   parameter_namespace=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
