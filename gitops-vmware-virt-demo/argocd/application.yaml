@@ -18,3 +18,8 @@ spec:
       selfHeal: true   # reverts out-of-band cluster changes
     syncOptions:
       - CreateNamespace=true
+  ignoreDifferences:
+    - group: kubevirt.io
+      kind: VirtualMachine
+      jsonPointers:
+        - /spec/template/spec/architecture
