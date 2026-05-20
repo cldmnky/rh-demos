@@ -372,8 +372,8 @@ dbg_step "SETUP 1 — Secrets"
 say "Setup 1 of 3 — Secrets
 
 The demo uses a single SSH key pair for two purposes:
-  🔑  GitHub deploy key — Tekton commits changes back to Git using SSH
-  🖥️  VM SSH key        — public key is injected via cloud-init into every VM
+  🔑  Tekton workspace  — Ansible tasks use the private key to SSH into VMs
+  🖥️  cloud-init        — public key is injected into every VM
 
 One key pair. No passwords stored. No tokens rotated. Fully auditable." 226
 wait
@@ -383,7 +383,7 @@ comment "Create the vm-demo namespace where everything will live."
 pe "oc create namespace ${NAMESPACE} --dry-run=client -o yaml | oc apply -f -"
 wait
 
-comment "vm-ssh-key — private key used by Tekton tasks for git SSH push and Ansible SSH access to VMs."
+comment "vm-ssh-key — private key mounted into Tekton tasks for Ansible SSH access to VMs."
 pe "oc create secret generic vm-ssh-key \
   --from-file=id_rsa=${SSH_PRIVATE_KEY} \
   --namespace=${NAMESPACE} \
@@ -634,7 +634,7 @@ clear
 # ACT 3 — Blue/Green Upgrade
 ##############################################################
 dbg_step "ACT 3 — Blue/Green Upgrade"
-act 3 "Blue/Green Upgrade — Git commits drive VM power state"
+act 3 "Blue/Green Upgrade — one Git commit triggers automation"
 
 say "Time to deploy v2.0.
 In vCenter: provision new VM, install manually, re-point the load balancer, hope the snapshot works.
@@ -656,7 +656,7 @@ wait
 clear
 
 comment "Bump the app version and push — the upgrade pipeline is triggered manually below."
-pe "sed -i '' 's/version: \"v1.0\"/version: \"v2.0\"/' ${DEMO_DIR}/pipelines/app-version.yaml"
+pe "ruby -0pi -e 'gsub(/version: \"v[0-9.]+\"/, \"version: \\\"v2.0\\\"\")' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
@@ -670,6 +670,7 @@ comment "Triggering the upgrade pipeline directly — no webhook needed."
 dbg_step "ACT 3 — creating upgrade PipelineRun"
 UPGRADE_PR=$(oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n ${NAMESPACE} -o name)
 UPGRADE_PR_NAME=${UPGRADE_PR##*/}
+EXPECTED_SNAPSHOT="blue-pre-upgrade-${UPGRADE_PR_NAME}"
 dbg_run oc get pipelinerun ${UPGRADE_PR_NAME} -n ${NAMESPACE} -o yaml
 pe "echo ${UPGRADE_PR}"
 wait
@@ -684,6 +685,29 @@ dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
 dbg_run oc get virtualmachinesnapshot -n ${NAMESPACE}
+wait
+clear
+
+comment "The green VM was not built from the golden image; it was cloned from blue's rootdisk snapshot."
+pe "oc get virtualmachinesnapshot ${EXPECTED_SNAPSHOT} -n ${NAMESPACE} \
+  -o jsonpath='{.status.virtualMachineSnapshotContentName}' && echo"
+VM_SNAPSHOT_CONTENT=$(oc get virtualmachinesnapshot "${EXPECTED_SNAPSHOT}" -n "${NAMESPACE}" \
+  -o jsonpath='{.status.virtualMachineSnapshotContentName}')
+ROOTDISK_SNAPSHOT=$(oc get virtualmachinesnapshotcontent "${VM_SNAPSHOT_CONTENT}" -n "${NAMESPACE}" \
+  -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}')
+GREEN_SOURCE_NAME=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
+  -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}')
+GREEN_SOURCE_NS=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
+  -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.namespace}')
+if [[ "${GREEN_SOURCE_NAME}" != "${ROOTDISK_SNAPSHOT}" || "${GREEN_SOURCE_NS}" != "${NAMESPACE}" ]]; then
+  echo "Green VM snapshot source mismatch: expected ${NAMESPACE}/${ROOTDISK_SNAPSHOT}, got ${GREEN_SOURCE_NS}/${GREEN_SOURCE_NAME}"
+  exit 1
+fi
+pe "oc get virtualmachinesnapshotcontent ${VM_SNAPSHOT_CONTENT} -n ${NAMESPACE} \
+  -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}' && echo"
+pe "oc get vm demo-vm-green -n ${NAMESPACE} \
+  -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.namespace}/{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}' && echo"
+comment "Expected rootdisk VolumeSnapshot: ${NAMESPACE}/${ROOTDISK_SNAPSHOT}"
 wait
 clear
 
