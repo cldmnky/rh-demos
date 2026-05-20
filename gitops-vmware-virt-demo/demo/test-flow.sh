@@ -54,7 +54,7 @@ commit_and_push_if_changed() {
 
 sync_argo() {
   local app="$1"
-  local old_finished deadline phase finished health
+  local old_finished deadline phase finished health message
 
   log "Syncing ArgoCD Application ${app}"
   old_finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
@@ -74,6 +74,12 @@ sync_argo() {
     if [[ "${finished}" != "${old_finished}" && "${phase}" == "Succeeded" ]]; then
       break
     fi
+    if [[ "${finished}" != "${old_finished}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app}: ${message}"
+      return 1
+    fi
     [[ "$(date +%s)" -gt "${deadline}" ]] && {
       echo "Timed out waiting for ${app} sync (phase=${phase}, finishedAt=${finished})"
       return 1
@@ -88,7 +94,7 @@ sync_argo() {
 
 sync_argo_git() {
   local app="$1"
-  local revision deadline sync_status health current_revision
+  local revision deadline sync_status health current_revision phase message
 
   revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
   log "Syncing ArgoCD Application ${app} to Git revision ${revision:0:7}"
@@ -105,6 +111,14 @@ sync_argo_git() {
 
     if [[ "${current_revision}" == "${revision}" && "${sync_status}" == "Synced" ]]; then
       break
+    fi
+    phase=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+    if [[ "${current_revision}" == "${revision}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app} at ${revision}: ${message}"
+      return 1
     fi
     [[ "$(date +%s)" -gt "${deadline}" ]] && {
       echo "Timed out waiting for ${app} to sync to ${revision}"

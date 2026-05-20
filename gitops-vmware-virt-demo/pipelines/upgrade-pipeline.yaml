@@ -300,9 +300,9 @@ spec:
                 sleep 5
               done
               echo "ArgoCD synced — green halted, blue still running, users unaffected"
-        params:
-          - name: run-id
-            value: $(params.run-id)
+      params:
+        - name: run-id
+          value: $(params.run-id)
       when:
         - input: "$(tasks.smoke-test.status)"
           operator: in
