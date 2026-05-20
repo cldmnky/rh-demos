@@ -37,9 +37,12 @@ oc patch argocd openshift-gitops -n "${ARGOCD_NS}" \
   --type=json \
   -p '[{"op":"remove","path":"/spec/sourceNamespaces"}]' 2>/dev/null || true
 
-# Delete MetalLB config
-echo "→ Removing MetalLB configuration..."
-oc delete -f "${DEMO_ROOT}/metallb/" --ignore-not-found 2>/dev/null || true
+# MetalLB pools are cluster-level shared infrastructure and are not created by
+# the demo flow, so cleanup intentionally leaves metallb-system untouched.
+echo "→ Leaving existing MetalLB configuration untouched..."
+# Remove any demo-pool/demo-l2 resources that may have been applied in error.
+oc delete ipaddresspool demo-pool -n metallb-system --ignore-not-found 2>/dev/null || true
+oc delete l2advertisement demo-l2 -n metallb-system --ignore-not-found 2>/dev/null || true
 
 # Delete VirtualMachineSnapshots before namespace deletion to avoid finalizer-induced stalls.
 # The upgrade pipeline creates blue-pre-upgrade-<run-id> snapshots; their VirtualMachineSnapshotContent

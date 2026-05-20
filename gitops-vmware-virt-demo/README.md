@@ -55,13 +55,10 @@ gitops-vmware-virt-demo/
 ├── base/                        # ArgoCD sync target
 │   ├── vm-blue.yaml             # VirtualMachine — runStrategy: Always
 │   ├── vm-green.yaml            # VirtualMachine — runStrategy: Halted (standby)
-│   ├── service-lb.yaml          # MetalLB LoadBalancer (selector: demo-vm-blue)
+│   ├── service-lb.yaml          # LoadBalancer (annotation: metallb pool)
 │   ├── service-blue-ssh.yaml    # ClusterIP for Ansible SSH to blue
 │   ├── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
 │   └── service-green-http.yaml  # ClusterIP for pre-cutover HTTP smoke test
-├── metallb/
-│   ├── ipaddresspool.yaml       # L2 address pool
-│   └── l2advertisement.yaml     # L2Advertisement
 ├── pipelines/
 │   ├── install-pipeline.yaml    # Tekton Pipeline: install-app
 │   ├── upgrade-pipeline.yaml    # Tekton Pipeline: upgrade-app
@@ -90,7 +87,7 @@ Install from OperatorHub or apply pre-staged `Subscription` YAMLs:
 | Operator | Namespace | Notes |
 |---|---|---|
 | OpenShift Virtualization (HCO) | `openshift-cnv` | Installs KubeVirt, CDI, SSP, CNAO |
-| MetalLB Operator | `metallb-system` | L2 or BGP address pool required |
+| MetalLB Operator | `metallb-system` | Pre-existing address pool required (demo references it, does not create it) |
 | OpenShift GitOps | `openshift-gitops` | ArgoCD instance auto-created |
 | OpenShift Pipelines | `openshift-pipelines` | Tekton with ArtifactHub hub resolver (≥ 1.12) |
 
@@ -142,11 +139,19 @@ virtctl image-upload dv rhel9-golden \
 
 ### 1 — MetalLB
 
-Edit `metallb/ipaddresspool.yaml` to match your demo network, then apply:
+The demo reuses an existing MetalLB `IPAddressPool` in `metallb-system`. It does **not**
+create any MetalLB resources. By default, `base/service-lb.yaml` requests the pool named `metallb`:
 
 ```bash
-oc apply -f metallb/ipaddresspool.yaml
-oc apply -f metallb/l2advertisement.yaml
+# Verify the pool exists before running the demo
+oc get ipaddresspool metallb -n metallb-system
+```
+
+If your cluster uses a different pool name, update the annotation in `base/service-lb.yaml`:
+
+```yaml
+annotations:
+  metallb.universe.tf/address-pool: <your-pool-name>
 ```
 
 ### 2 — Deploy Key and Cluster Secrets
@@ -341,8 +346,8 @@ oc get csv -n openshift-cnv | grep -E "Succeeded|Failed"
 oc get csv -n openshift-gitops | grep -E "Succeeded|Failed"
 oc get csv -n openshift-pipelines | grep -E "Succeeded|Failed"
 
-# 2. MetalLB pool configured
-oc get ipaddresspool -n metallb-system
+# 2. Existing MetalLB pool available (not created by demo)
+oc get ipaddresspool metallb -n metallb-system
 
 # 3. RHEL9 boot source ready
 oc get datasource rhel9 -n openshift-virtualization-os-images \

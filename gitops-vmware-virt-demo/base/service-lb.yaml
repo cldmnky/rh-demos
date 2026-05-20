@@ -4,11 +4,11 @@ metadata:
   name: demo-app-lb
   namespace: vm-demo
   annotations:
-    metallb.universe.tf/address-pool: demo-pool
+    metallb.universe.tf/address-pool: metallb
 spec:
   type: LoadBalancer
   selector:
-    kubevirt.io/domain: demo-vm-blue  # updated to demo-vm-green on cutover
+    kubevirt.io/domain: demo-vm-blue
   ports:
     - name: http
       port: 80

@@ -30,6 +30,12 @@ spec:
         #!/bin/bash
         set -eu
 
+        # OpenShift assigns arbitrary UIDs — SSH client requires a passwd entry.
+        # /etc/passwd is group-writable (gid=0) in UBI-based images like awx-ee.
+        if ! getent passwd "$(id -u)" &>/dev/null; then
+          echo "ansible:x:$(id -u):0:Ansible:/tmp:/bin/bash" >> /etc/passwd
+        fi
+
         # Secret mounts are read-only — copy key to writable /tmp
         PRIVATE_KEY="/tmp/id_rsa"
         cp "$(workspaces.ssh-key.path)/id_rsa" "$PRIVATE_KEY"
