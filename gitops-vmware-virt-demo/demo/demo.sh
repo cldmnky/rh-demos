@@ -38,14 +38,41 @@ unset _DEMO_ARGS _a
 cd "${REPO_ROOT}"
 
 ########################
-# pre-flight: ensure app-version.yaml is on v1.0
+# pre-flight: reset state that may be left over from a previous demo run
 ########################
+_preflight_dirty=0
+
 if ! grep -q 'version: "v1.0"' "${DEMO_DIR}/pipelines/app-version.yaml"; then
-  echo "⚠️  app-version.yaml is not v1.0 — resetting before demo starts."
-  git pull origin main
+  echo "⚠️  app-version.yaml is not v1.0 — resetting."
   sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_DIR}/pipelines/app-version.yaml"
-  git add "${DEMO_DIR}/pipelines/app-version.yaml"
-  git commit -m "chore: reset app-version to v1.0 before demo"
+  _preflight_dirty=1
+fi
+
+if ! grep -q 'runStrategy: Halted' "${DEMO_DIR}/base/vm-green.yaml"; then
+  echo "⚠️  vm-green.yaml is not Halted — resetting."
+  yq e '.spec.runStrategy = "Halted"' -i "${DEMO_DIR}/base/vm-green.yaml"
+  _preflight_dirty=1
+fi
+
+if ! grep -q 'runStrategy: Always' "${DEMO_DIR}/base/vm-blue.yaml"; then
+  echo "⚠️  vm-blue.yaml is not Always — resetting."
+  yq e '.spec.runStrategy = "Always"' -i "${DEMO_DIR}/base/vm-blue.yaml"
+  _preflight_dirty=1
+fi
+
+if ! grep -q 'demo-vm-blue' "${DEMO_DIR}/base/service-lb.yaml"; then
+  echo "⚠️  service-lb.yaml selector is not demo-vm-blue — resetting."
+  yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i "${DEMO_DIR}/base/service-lb.yaml"
+  _preflight_dirty=1
+fi
+
+if [[ $_preflight_dirty -eq 1 ]]; then
+  git pull origin main
+  git add "${DEMO_DIR}/pipelines/app-version.yaml" \
+          "${DEMO_DIR}/base/vm-green.yaml" \
+          "${DEMO_DIR}/base/vm-blue.yaml" \
+          "${DEMO_DIR}/base/service-lb.yaml"
+  git commit -m "chore: reset demo state to v1.0 / blue before demo"
   git push origin main
 fi
 
