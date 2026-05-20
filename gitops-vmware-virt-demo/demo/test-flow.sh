@@ -238,22 +238,6 @@ wait_for_lb_ip() {
   echo "LoadBalancer IP: ${LB_IP}"
 }
 
-wait_for_green_deleted() {
-  local deadline=$(( $(date +%s) + 120 ))
-
-  log "Waiting for green VM/DataVolume/PVC deletion"
-  until ! oc get vm demo-vm-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
-        ! oc get datavolume centos10-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
-        ! oc get pvc centos10-green -n "${NAMESPACE}" >/dev/null 2>&1; do
-    [[ "$(date +%s)" -gt "${deadline}" ]] && {
-      echo "Timed out waiting for green resources to delete"
-      oc get vm,datavolume,pvc -n "${NAMESPACE}" || true
-      return 1
-    }
-    sleep 3
-  done
-}
-
 assert_green_uses_blue_snapshot() {
   local vm_snapshot="$1"
   local expected_snapshot
@@ -407,7 +391,6 @@ sync_argo "vm-demo"
 run oc delete vm demo-vm-green -n "${NAMESPACE}" --ignore-not-found --wait=false
 run oc delete datavolume centos10-green -n "${NAMESPACE}" --ignore-not-found --wait=false
 run oc delete pvc centos10-green -n "${NAMESPACE}" --ignore-not-found --wait=false
-wait_for_green_deleted
 patch_vm_demo_parameters "null"
 sync_argo "vm-demo"
 
