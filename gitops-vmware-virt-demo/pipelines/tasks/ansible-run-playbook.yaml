@@ -16,6 +16,16 @@ spec:
     - name: ssh-key
       description: "Secret volume containing the SSH private key at id_rsa"
   steps:
+    - name: wait-for-ssh
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        #!/bin/bash
+        echo "Waiting for SSH on $(params.ssh-host):22..."
+        until timeout 5 bash -c "cat < /dev/null > /dev/tcp/$(params.ssh-host)/22" 2>/dev/null; do
+          echo "  not ready, retrying in 5s..."
+          sleep 5
+        done
+        echo "SSH is reachable."
     - name: run-ansible
       # quay.io/ansible/awx-ee is the AWX default EE — pullable without auth.
       # ghcr.io/ansible/community-ansible-dev-tools is not always reachable.
