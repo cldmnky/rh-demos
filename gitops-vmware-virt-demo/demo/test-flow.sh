@@ -132,6 +132,43 @@ sync_argo_git() {
   echo "${app}: synced to ${revision:0:7}, health=${health}"
 }
 
+wait_argo_git() {
+  local app="$1"
+  local revision deadline sync_status health current_revision phase message
+
+  revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+  log "Waiting for ArgoCD Application ${app} to reach Git revision ${revision:0:7}"
+
+  deadline=$(( $(date +%s) + 300 ))
+  while true; do
+    current_revision=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
+    sync_status=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+
+    if [[ "${current_revision}" == "${revision}" && "${sync_status}" == "Synced" ]]; then
+      break
+    fi
+    phase=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+    if [[ "${current_revision}" == "${revision}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app} at ${revision}: ${message}"
+      return 1
+    fi
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for ${app} to reach ${revision}"
+      return 1
+    }
+    sleep 3
+  done
+
+  health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+  echo "${app}: reached ${revision:0:7}, health=${health}"
+}
+
 wait_for_pr() {
   local pr_name="$1"
   local timeout="${2:-900}"
@@ -305,7 +342,7 @@ run oc apply -f "${DEMO_ROOT}/argocd/rbac.yaml"
 run oc apply -f "${DEMO_ROOT}/argocd/application.yaml" -n "${NAMESPACE}"
 run oc apply -f "${DEMO_ROOT}/argocd/application-infra.yaml" -n "${NAMESPACE}"
 
-sync_argo "vm-demo"
+wait_argo_git "vm-demo"
 sync_argo_git "vm-demo-infra"
 wait_for_blue_running
 wait_for_lb_ip
