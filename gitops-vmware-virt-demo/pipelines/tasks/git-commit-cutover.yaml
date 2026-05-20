@@ -17,6 +17,9 @@ spec:
     - name: repo-subdir
       description: "Path to this demo inside the Git repository"
       default: "gitops-vmware-virt-demo"
+  results:
+    - name: git-sha
+      description: "Git SHA of the commit that was pushed (or current HEAD if no-op)"
   workspaces:
     - name: ssh-key
       description: "SSH deploy key (key: id_rsa)"
@@ -51,7 +54,9 @@ spec:
         git add "$BASE_DIR/service-lb.yaml" "$BASE_DIR/$(params.halted-vm-file)"
         git diff --cached --quiet && {
           echo "No Git changes needed"
+          git rev-parse HEAD | tr -d '\n' > $(results.git-sha.path)
           exit 0
         }
         git commit -m "$(params.commit-message)"
         git push
+        git rev-parse HEAD | tr -d '\n' > $(results.git-sha.path)

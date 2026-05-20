@@ -72,19 +72,39 @@ spec:
       runAfter:
         - git-start-green
       taskSpec:
+        params:
+          - name: git-sha
+            type: string
         steps:
           - name: sync
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set -eu
+              SHA="$(params.git-sha)"
+              echo "Waiting for ArgoCD to sync vm-demo to ${SHA}..."
+              # Hard refresh so ArgoCD fetches the new commit immediately
+              oc annotate application.argoproj.io vm-demo -n vm-demo \
+                argocd.argoproj.io/refresh=hard --overwrite
+              # Trigger sync operation
               oc patch application.argoproj.io vm-demo -n vm-demo \
                 --type merge \
                 --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-              oc wait application.argoproj.io/vm-demo -n vm-demo \
-                --for=jsonpath='{.status.sync.status}'=Synced \
-                --timeout=300s
-              echo "ArgoCD synced vm-demo — green VM start committed"
+              # Wait until ArgoCD has synced THIS specific revision
+              DEADLINE=$(( $(date +%s) + 300 ))
+              until [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.revision}')" = "${SHA}" ] && \
+                    [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.status}')" = "Synced" ]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+                echo -n '.'
+                sleep 5
+              done
+              echo ""
+              echo "ArgoCD synced vm-demo to ${SHA} — green VM start committed"
+      params:
+        - name: git-sha
+          value: $(tasks.git-start-green.results.git-sha)
 
     # [4] Wait for green VMI to reach Running phase
     - name: wait-for-green
@@ -189,19 +209,39 @@ spec:
       runAfter:
         - git-cutover
       taskSpec:
+        params:
+          - name: git-sha
+            type: string
         steps:
           - name: sync
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set -eu
+              SHA="$(params.git-sha)"
+              echo "Waiting for ArgoCD to sync vm-demo to ${SHA}..."
+              # Hard refresh so ArgoCD fetches the new commit immediately
+              oc annotate application.argoproj.io vm-demo -n vm-demo \
+                argocd.argoproj.io/refresh=hard --overwrite
+              # Trigger sync operation
               oc patch application.argoproj.io vm-demo -n vm-demo \
                 --type merge \
                 --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-              oc wait application.argoproj.io/vm-demo -n vm-demo \
-                --for=jsonpath='{.status.sync.status}'=Synced \
-                --timeout=300s
-              echo "ArgoCD synced vm-demo — cutover complete, traffic on green"
+              # Wait until ArgoCD has synced THIS specific revision
+              DEADLINE=$(( $(date +%s) + 300 ))
+              until [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.revision}')" = "${SHA}" ] && \
+                    [ "$(oc get application.argoproj.io/vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.status}')" = "Synced" ]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+                echo -n '.'
+                sleep 5
+              done
+              echo ""
+              echo "ArgoCD synced vm-demo to ${SHA} — cutover complete, traffic on green"
+      params:
+        - name: git-sha
+          value: $(tasks.git-cutover.results.git-sha)
 
   # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
   finally:
