@@ -67,10 +67,35 @@ spec:
         - name: ssh-key
           workspace: ssh-key
 
-    # [3] Wait for green VMI to reach Running phase
-    - name: wait-for-green
+    # [3] Trigger ArgoCD sync so vm-green starts immediately (no polling delay)
+    - name: sync-argo-start-green
       runAfter:
         - git-start-green
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: openshift-client
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: SCRIPT
+          value: |
+            oc patch application.argoproj.io vm-demo -n vm-demo \
+              --type merge \
+              --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
+            until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                -o jsonpath='{.status.sync.status}')" == "Synced" ]]; do
+              sleep 3
+            done
+            echo "ArgoCD synced vm-demo — green VM start committed"
+
+    # [4] Wait for green VMI to reach Running phase
+    - name: wait-for-green
+      runAfter:
+        - sync-argo-start-green
       taskRef:
         resolver: hub
         params:
@@ -164,6 +189,31 @@ spec:
       workspaces:
         - name: ssh-key
           workspace: ssh-key
+
+    # [7] Trigger ArgoCD sync after cutover commit (traffic → green, blue → Halted)
+    - name: sync-argo-cutover
+      runAfter:
+        - git-cutover
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: openshift-client
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: SCRIPT
+          value: |
+            oc patch application.argoproj.io vm-demo -n vm-demo \
+              --type merge \
+              --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
+            until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
+                -o jsonpath='{.status.sync.status}')" == "Synced" ]]; do
+              sleep 3
+            done
+            echo "ArgoCD synced vm-demo — cutover complete, traffic on green"
 
   # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
   finally:

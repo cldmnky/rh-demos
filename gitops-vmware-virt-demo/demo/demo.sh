@@ -53,22 +53,59 @@ function comment() {
   echo "$1" | gum style --italic --foreground=245 --padding="0 2"
 }
 
-function wait_for_argo_sync() {
+function sync_argo() {
   local app="$1"
-  comment "Waiting for ArgoCD to sync ${app}..."
-  until oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.sync.status}' 2>/dev/null | grep -q "^Synced$"; do
-    sleep 5
+  local revision
+  revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+
+  comment "Triggering ArgoCD sync for ${app} @ ${revision:0:7}..."
+  oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    --type merge \
+    --patch '{"operation":{"initiatedBy":{"username":"demo"},"sync":{"prune":true}}}' \
+    > /dev/null 2>&1
+
+  # Wait for ArgoCD to sync this exact revision (not a stale Synced from before the push)
+  until [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.revision}' 2>/dev/null)" == "${revision}" ]] && \
+    [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.status}' 2>/dev/null)" == "Synced" ]]; do
+    sleep 3
   done
-  # vm-demo is Suspended (green VM is Halted by design) — accept Healthy or Suspended
-  until oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
+
+  # vm-demo is Suspended when vm-green is Halted — accept Healthy or Suspended
+  until oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.health.status}' 2>/dev/null | grep -qE "^(Healthy|Suspended)$"; do
-    sleep 5
+    sleep 3
   done
+
   local health
-  health=$(oc get applications.argoproj.io "${app}" -n "${NAMESPACE}" \
+  health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.health.status}' 2>/dev/null)
-  echo "✅ ${app}: Synced / ${health}"
+  echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
+}
+
+function wait_for_pr() {
+  local pr_name="$1"
+  local timeout="${2:-600}"
+  local waited=0
+
+  comment "Waiting for PipelineRun ${pr_name} to complete..."
+  while true; do
+    local status reason
+    status=$(oc get pipelinerun "${pr_name}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Succeeded")].status}' 2>/dev/null)
+    reason=$(oc get pipelinerun "${pr_name}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Succeeded")].reason}' 2>/dev/null)
+    case "${status}" in
+      True)  echo "✅ PipelineRun ${pr_name}: Succeeded"; return 0 ;;
+      False) echo "❌ PipelineRun ${pr_name}: Failed (${reason})"; return 1 ;;
+      *)
+        sleep 5
+        (( waited += 5 ))
+        [[ $waited -ge $timeout ]] && echo "⏱️  Timeout waiting for ${pr_name}" && return 1
+        ;;
+    esac
+  done
 }
 
 ##############################################################
@@ -114,17 +151,21 @@ wait
 
 comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the cloud-user's authorized_keys."
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
+# Write to a file — pe/eval collapses multi-line --from-literal strings into invalid YAML
+{
+  printf '#cloud-config\n'
+  printf 'users:\n'
+  printf '  - name: cloud-user\n'
+  printf '    sudo: ALL=(ALL) NOPASSWD:ALL\n'
+  printf '    ssh_authorized_keys:\n'
+  printf '      - %s\n' "${PUB_KEY}"
+  printf 'chpasswd:\n'
+  printf '  list: |\n'
+  printf '    cloud-user:redhat\n'
+  printf '  expire: false\n'
+} > /tmp/vm-cloud-init.yaml
 pe "oc create secret generic vm-cloud-init \
-  --from-literal=userdata='#cloud-config
-users:
-  - name: cloud-user
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys:
-      - ${PUB_KEY}
-chpasswd:
-  list: |
-    cloud-user:redhat
-  expire: false' \
+  --from-file=userdata=/tmp/vm-cloud-init.yaml \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
 wait
@@ -207,8 +248,8 @@ Let's watch it work." 117
 wait
 
 pe "oc get applications.argoproj.io -n ${NAMESPACE}"
-wait_for_argo_sync "vm-demo"
-wait_for_argo_sync "vm-demo-infra"
+sync_argo "vm-demo"
+sync_argo "vm-demo-infra"
 wait
 clear
 
@@ -307,12 +348,14 @@ pe "oc get pipelines.tekton.dev install-app -n ${NAMESPACE}"
 wait
 
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
-pe "oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE}"
+INSTALL_PR=$(oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE} -o name)
+pe "echo ${INSTALL_PR}"
 wait
 clear
 
 comment "Watching the install-app pipeline logs stream in real-time. Every step is a Tekton Task."
-pe "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
+pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
+wait_for_pr "${INSTALL_PR##*/}"
 wait
 clear
 
@@ -340,33 +383,36 @@ clear
 say "The upgrade pipeline — every step is a Git commit or waits on one:
 
   [1] snapshot-blue      VirtualMachineSnapshot — safety net before touching anything
-  [2] git-start-green    Commit: vm-green runStrategy → Always  → ArgoCD starts the VM
-  [3] wait-for-green     Polls VMI until Running
-  [4] ansible-upgrade    Ansible deploys v2.0 onto green
-  [5] smoke-test         curl /health directly on green
-  [6-PASS] git-cutover   Commit: service selector → green, vm-blue → Halted
-  [6-FAIL] git-stop      Commit: vm-green → Halted  (blue untouched, users unaffected)" 117
+  [2] git-start-green    Commit: vm-green runStrategy → Always
+  [3] sync-argo          ArgoCD sync triggered → green VM starts immediately
+  [4] wait-for-green     Polls VMI until Running
+  [5] ansible-upgrade    Ansible deploys v2.0 onto green
+  [6] smoke-test         curl /health directly on green
+  [7-PASS] git-cutover   Commit: service selector → green, vm-blue → Halted → ArgoCD sync
+  [7-FAIL] git-stop      Commit: vm-green → Halted  (blue untouched, users unaffected)" 117
 wait
 clear
 
-comment "Bump the app version and push — the GitHub webhook fires the EventListener."
+comment "Bump the app version and push — ArgoCD and the upgrade pipeline are triggered explicitly."
 pe "sed -i '' 's/version: \"v1.0\"/version: \"v2.0\"/' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'bump app version to v2.0'"
 pe "git -C ${REPO_ROOT} push origin main"
+sync_argo "vm-demo-infra"
 wait
 clear
 
-comment "GitHub webhook → Tekton EventListener → upgrade-app PipelineRun started."
-comment "Watching VM state in the background while pipeline logs stream."
-pe "oc get vm -n ${NAMESPACE} -w &"
-WATCH_PID=$!
-sleep 3
-pe "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix &"
-kill $WATCH_PID 2>/dev/null
-pei ""
+comment "Triggering the upgrade pipeline directly — no webhook needed."
+UPGRADE_PR=$(oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n ${NAMESPACE} -o name)
+pe "echo ${UPGRADE_PR}"
+wait
+clear
+
+comment "Streaming upgrade-app logs. ArgoCD syncs are triggered inside the pipeline after each git commit."
+pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix"
+wait_for_pr "${UPGRADE_PR##*/}"
 wait
 clear
 
@@ -404,9 +450,11 @@ pe "yq e '.spec.runStrategy = \"Always\"' -i ${DEMO_DIR}/base/vm-blue.yaml"
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-blue.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'rollback: restart blue standby'"
 pe "git -C ${REPO_ROOT} push origin main"
+sync_argo "vm-demo"
 wait
 
-comment "ArgoCD picks it up — blue boots. Waiting for Running state."
+comment "ArgoCD synced — blue boots. Waiting for VMI to exist and reach Ready state."
+pei "until oc get vmi demo-vm-blue -n ${NAMESPACE} >/dev/null 2>&1; do sleep 3; done"
 pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120s"
 wait
 
@@ -417,6 +465,7 @@ pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} commit --amend --no-edit"
 pe "git -C ${REPO_ROOT} push --force-with-lease origin main"
+sync_argo "vm-demo"
 wait
 pe "curl -s http://${LB_IP}/"
 wait

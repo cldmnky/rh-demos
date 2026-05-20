@@ -10,7 +10,7 @@ spec:
     targetRevision: main
     path: gitops-vmware-virt-demo/pipelines
     directory:
-      exclude: '{install-pipelinerun.yaml,ansible-configmaps.yaml}'
+      exclude: '{install-pipelinerun.yaml,upgrade-pipelinerun.yaml,ansible-configmaps.yaml}'
       recurse: true
   destination:
     server: https://kubernetes.default.svc

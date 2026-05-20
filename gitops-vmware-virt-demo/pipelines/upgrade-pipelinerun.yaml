@@ -1,0 +1,19 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: upgrade-app-
+  namespace: vm-demo
+spec:
+  pipelineRef:
+    name: upgrade-app
+  params:
+    - name: git-repo-url
+      value: git@github.com:cldmnky/rh-demos.git
+    - name: lb-ip-url
+      value: http://demo-app-lb.vm-demo.svc.cluster.local
+    - name: run-id
+      value: demo-run
+  workspaces:
+    - name: ssh-key
+      secret:
+        secretName: vm-ssh-key
