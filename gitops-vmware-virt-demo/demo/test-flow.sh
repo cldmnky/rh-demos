@@ -103,9 +103,13 @@ sync_argo_git() {
 
   revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
   log "Syncing ArgoCD Application ${app} to Git revision ${revision:0:7}"
+  oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+
   run oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
     --type merge \
-    --patch '{"operation":{"initiatedBy":{"username":"test-flow"},"sync":{"prune":true}}}'
+    --patch "{\"operation\":{\"initiatedBy\":{\"username\":\"test-flow\"},\"sync\":{\"revision\":\"${revision}\",\"prune\":true}}}"
 
   deadline=$(( $(date +%s) + ARGO_SYNC_TIMEOUT ))
   while true; do
