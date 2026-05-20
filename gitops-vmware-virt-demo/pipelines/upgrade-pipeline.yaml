@@ -112,6 +112,10 @@ spec:
               done
               echo "Green VM and DataVolume deleted."
 
+              # Clear any automated/selfHeal operation before starting our explicit sync.
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
+                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+
               # Record current operationState.finishedAt to detect when a NEW sync completes.
               OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
                 -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
@@ -251,6 +255,9 @@ spec:
                     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
                   ]}}}}"
 
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
+                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+
               OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
                 -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
 
@@ -311,6 +318,9 @@ spec:
                     {"name":"green.diskSnapshot.namespace","value":"vm-demo"},
                     {"name":"traffic.activeSlot","value":"blue"}
                   ]}}}}'
+
+              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
+                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
 
               OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
                 -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
