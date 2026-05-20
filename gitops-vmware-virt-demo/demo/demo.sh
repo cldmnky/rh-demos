@@ -38,6 +38,18 @@ unset _DEMO_ARGS _a
 cd "${REPO_ROOT}"
 
 ########################
+# pre-flight: ensure app-version.yaml is on v1.0
+########################
+if ! grep -q 'version: "v1.0"' "${DEMO_DIR}/pipelines/app-version.yaml"; then
+  echo "⚠️  app-version.yaml is not v1.0 — resetting before demo starts."
+  git pull origin main
+  sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_DIR}/pipelines/app-version.yaml"
+  git add "${DEMO_DIR}/pipelines/app-version.yaml"
+  git commit -m "chore: reset app-version to v1.0 before demo"
+  git push origin main
+fi
+
+########################
 # config
 ########################
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
