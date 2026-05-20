@@ -49,8 +49,9 @@ SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
 
-# dbg_step is defined by debug.sh when --debug is given; no-op otherwise.
+# dbg_step / dbg_run are defined by debug.sh when --debug is given; no-ops otherwise.
 command -v dbg_step &>/dev/null || dbg_step() { :; }
+command -v dbg_run  &>/dev/null || dbg_run()  { :; }
 
 ########################
 # helpers
@@ -190,6 +191,7 @@ pe "oc create secret generic vm-cloud-init \
 wait
 
 pe "oc get secret vm-ssh-key vm-cloud-init -n ${NAMESPACE}"
+dbg_run oc get secret vm-ssh-key vm-cloud-init -n ${NAMESPACE} -o yaml
 wait
 clear
 
@@ -271,6 +273,8 @@ wait
 pe "oc get applications.argoproj.io -n ${NAMESPACE}"
 sync_argo "vm-demo"
 sync_argo "vm-demo-infra"
+dbg_run oc get applications.argoproj.io -n ${NAMESPACE} -o wide
+dbg_run oc get all -n ${NAMESPACE}
 wait
 clear
 
@@ -297,6 +301,8 @@ done
 kill $WATCH_PID 2>/dev/null
 pei ""
 pe "oc get vm -n ${NAMESPACE}"
+dbg_run oc get vm,vmi -n ${NAMESPACE} -o wide
+dbg_run oc get svc -n ${NAMESPACE}
 wait
 
 comment "MetalLB has assigned a real external IP from our address pool."
@@ -374,6 +380,7 @@ wait
 comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
 dbg_step "ACT 2 — creating install PipelineRun"
 INSTALL_PR=$(oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE} -o name)
+dbg_run oc get pipelinerun ${INSTALL_PR##*/} -n ${NAMESPACE} -o yaml
 pe "echo ${INSTALL_PR}"
 wait
 clear
@@ -383,6 +390,8 @@ dbg_step "ACT 2 — streaming install-app logs (${INSTALL_PR##*/})"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=install-app --tail=-1 --prefix"
 dbg_step "ACT 2 — waiting for install PipelineRun to complete"
 wait_for_pr "${INSTALL_PR##*/}"
+dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
+dbg_run oc get vm,vmi -n ${NAMESPACE}
 wait
 clear
 
@@ -435,6 +444,7 @@ clear
 comment "Triggering the upgrade pipeline directly — no webhook needed."
 dbg_step "ACT 3 — creating upgrade PipelineRun"
 UPGRADE_PR=$(oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n ${NAMESPACE} -o name)
+dbg_run oc get pipelinerun ${UPGRADE_PR##*/} -n ${NAMESPACE} -o yaml
 pe "echo ${UPGRADE_PR}"
 wait
 clear
@@ -444,6 +454,10 @@ dbg_step "ACT 3 — streaming upgrade-app logs (${UPGRADE_PR##*/})"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix"
 dbg_step "ACT 3 — waiting for upgrade PipelineRun to complete"
 wait_for_pr "${UPGRADE_PR##*/}"
+dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
+dbg_run oc get vm,vmi -n ${NAMESPACE}
+dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\\n"}'
+dbg_run oc get virtualmachinesnapshot -n ${NAMESPACE}
 wait
 clear
 
@@ -498,6 +512,8 @@ pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-green.yaml"
 pe "git -C ${REPO_ROOT} commit --amend --no-edit"
 pe "git -C ${REPO_ROOT} push --force-with-lease origin main"
 sync_argo "vm-demo"
+dbg_run oc get vm,vmi -n ${NAMESPACE}
+dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\\n"}'
 wait
 pe "curl -s http://${LB_IP}/"
 wait

@@ -8,6 +8,8 @@
 #   ERR trap — logs every command failure with exit code and context
 #   dbg_step "label" — named checkpoint; shows dim progress on terminal
 #                      and a timestamped marker in the log
+#   dbg_run "oc ..." — runs a command, captures stdout+stderr, writes both
+#                      to the log; also prints a faint indicator on the terminal
 #   EXIT trap — dumps the complete log to the terminal and removes the file
 #
 # Requires bash 4.2+ for \D{} in PS4 and printf %(...)T.
@@ -56,6 +58,37 @@ dbg_step() {
   printf '\e[2m[dbg +%ds] %s\e[0m\n' "$elapsed" "$*" >&2
   # Separator in the log file
   printf '\n┄┄┄ [+%ds] %s ┄┄┄\n\n' "$elapsed" "$*" >&9
+}
+
+# ── Run a command and capture its output into the log ─────────────
+# Usage: dbg_run oc get vm -n vm-demo
+#        dbg_run oc describe pipelinerun install-app-xyz -n vm-demo
+#
+# The command runs normally (inherits the environment), stdout and stderr
+# are both captured and written to the debug log with a header showing
+# the command, its exit code, and a timestamp.  The terminal only sees a
+# faint one-liner so the demo presentation is not disturbed.
+dbg_run() {
+  local elapsed rc output
+  elapsed=$(( $(date +%s) - _DBG_START ))
+
+  # Pause xtrace so the capture machinery doesn't flood the log
+  set +x
+
+  printf '\e[2m[dbg +%ds] $ %s\e[0m\n' "$elapsed" "$*" >&2
+
+  output=$("$@" 2>&1)
+  rc=$?
+
+  {
+    printf '\n▶  [+%ds] $ %s\n' "$elapsed" "$*"
+    printf '   exit=%d\n' "$rc"
+    printf '%s\n' "${output}" | sed 's/^/   /'
+    printf '\n'
+  } >&9
+
+  set -x
+  return "$rc"
 }
 
 # ── EXIT handler — dump log to terminal then delete ───────────────
