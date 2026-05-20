@@ -22,19 +22,26 @@ Both VMs — blue (active) and green (standby) — are defined in Git **before t
 > Traditional HA setups often require resource reservation for standby nodes. Here, we demonstrate a *truly* zero-cost standby. The VM is defined and ready to go, but consumes no compute until needed. This is GitOps-driven configuration management, not a vCenter HA cluster.
 
 ```
-Git repo state at rest:
-  base/vm-blue.yaml       → runStrategy: Always    (active, running)
-  base/vm-green.yaml      → runStrategy: Halted    (standby, powered off)
-  base/service-lb.yaml    → selector: demo-vm-blue (traffic → blue)
+Helm values.yaml at rest (in Git):
+  blue.runStrategy: "Always"         # active, running
+  green.runStrategy: "Halted"        # standby, powered off (zero cost)
+  traffic.activeSlot: "blue"         # LoadBalancer → blue
 
-After Tekton Commit 1 ("start green for upgrade"):
-  base/vm-green.yaml      → runStrategy: Always    (ArgoCD starts green)
-
-After Tekton Commit 2 ("cutover" — only if smoke test passed):
-  base/service-lb.yaml    → selector: demo-vm-green (traffic → green)
-  base/vm-blue.yaml       → runStrategy: Halted    (ArgoCD halts blue)
-
-Rollback: git revert Commit 2 → ArgoCD restores instantly
+During upgrade (ArgoCD parameter overrides):
+  Step 1 - Start green:
+    green.runStrategy: "Always"      # ArgoCD starts green VM
+    green.diskSnapshot.name: <blue-snapshot>  # Clone from blue's snapshot
+    
+  Step 2 - Cutover (after smoke test passes):
+    traffic.activeSlot: "green"      # LoadBalancer → green
+    blue.runStrategy: "Halted"       # ArgoCD halts blue (zero cost)
+    
+  Step 3 - Rollback (patch ArgoCD parameters):
+    blue.runStrategy: "Always"       # Start blue
+    green.runStrategy: "Halted"      # Halt green
+    traffic.activeSlot: "blue"       # LoadBalancer → blue
+    
+Then clear parameters → values.yaml defaults take over
 ```
 
 ### The Three "VMware Can't Do This" Moments
@@ -57,29 +64,35 @@ gitops-vmware-virt-demo/
 ├── README.md
 ├── argocd/
 │   ├── application.yaml         # ArgoCD Application (prune: true, selfHeal: true)
+│   ├── application-infra.yaml   # ArgoCD Application for pipeline infrastructure
+│   ├── appproject.yaml          # ArgoCD AppProject for scoping
 │   └── rbac.yaml                # ArgoCD controller permissions in vm-demo
-├── base/                        # ArgoCD sync target
-│   ├── vm-blue.yaml             # VirtualMachine — runStrategy: Always
-│   ├── vm-green.yaml            # VirtualMachine — runStrategy: Halted (standby)
-│   ├── service-lb.yaml          # LoadBalancer (annotation: metallb pool)
-│   ├── service-blue-ssh.yaml    # ClusterIP for Ansible SSH to blue
-│   ├── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
-│   └── service-green-http.yaml  # ClusterIP for pre-cutover HTTP smoke test
+├── chart/                       # Helm chart — ArgoCD sync target
+│   ├── Chart.yaml
+│   ├── values.yaml              # Default values: blue=Always, green=Halted, traffic=blue
+│   └── templates/
+│       ├── vm-blue.yaml         # VirtualMachine template
+│       ├── vm-green.yaml        # VirtualMachine template
+│       ├── service-lb.yaml      # LoadBalancer with MetalLB annotation
+│       ├── service-blue-ssh.yaml    # ClusterIP for Ansible SSH to blue
+│       ├── service-green-ssh.yaml   # ClusterIP for Ansible SSH to green
+│       └── service-green-http.yaml  # ClusterIP for pre-cutover HTTP smoke test
 ├── pipelines/
 │   ├── install-pipeline.yaml    # Tekton Pipeline: install-app
 │   ├── upgrade-pipeline.yaml    # Tekton Pipeline: upgrade-app
 │   ├── install-pipelinerun.yaml # Manual PipelineRun trigger
+│   ├── upgrade-pipelinerun.yaml # Manual PipelineRun trigger for upgrade
 │   ├── app-version.yaml         # ConfigMap — bump version to trigger upgrade
 │   ├── ansible-configmaps.yaml  # Playbooks as ConfigMaps (reference only — not required)
 │   ├── event-listener.yaml      # Tekton EventListener + GitHub webhook trigger
 │   └── tasks/
-│       ├── git-commit-vm-state.yaml   # Patches runStrategy and commits to Git
-│       ├── git-commit-cutover.yaml    # Commits service selector + halts outgoing VM
 │       ├── ansible-run-playbook.yaml  # Runs Ansible playbook via community-ansible-dev-tools
 │       └── smoke-test.yaml            # curl health check with retry
-└── ansible/
-    ├── install-app.yaml         # Playbook: install nginx + v1.0
-    └── upgrade-app.yaml         # Playbook: deploy v2.0
+├── ansible/
+│   ├── install-app.yaml         # Playbook: install Apache httpd + v1.0
+│   └── upgrade-app.yaml         # Playbook: deploy v2.0
+└── scripts/
+    └── setup-secrets.sh         # Helper to create vm-ssh-key and vm-cloud-init secrets
 ```
 
 ---
@@ -146,14 +159,14 @@ virtctl image-upload dv rhel9-golden \
 ### 1 — MetalLB
 
 The demo reuses an existing MetalLB `IPAddressPool` in `metallb-system`. It does **not**
-create any MetalLB resources. By default, `base/service-lb.yaml` requests the pool named `metallb`:
+create any MetalLB resources. By default, `chart/templates/service-lb.yaml` requests the pool named `metallb`:
 
 ```bash
 # Verify the pool exists before running the demo
 oc get ipaddresspool metallb -n metallb-system
 ```
 
-If your cluster uses a different pool name, update the annotation in `base/service-lb.yaml`:
+If your cluster uses a different pool name, update the annotation in `chart/templates/service-lb.yaml`:
 
 ```yaml
 annotations:
@@ -202,7 +215,7 @@ oc apply -f argocd/application.yaml -n vm-demo
 oc apply -f argocd/application-infra.yaml -n vm-demo
 ```
 
-ArgoCD syncs `base/` to the `vm-demo` namespace. Within ~30 seconds:
+ArgoCD syncs the Helm chart (`chart/`) to the `vm-demo` namespace. Within ~30 seconds:
 - `demo-vm-blue` is `Running`
 - `demo-vm-green` is `Stopped`
 - `demo-app-lb` has an external IP
@@ -230,7 +243,7 @@ oc get route upgrade-trigger -n vm-demo
 > [SPEAKER NOTE: Opening]
 > In VMware, creating a VM means clicking through vCenter wizards and it lives only in vCenter. Here, every VM is a YAML file in Git — including the standby VM we'll use for upgrades later. This is **declarative infrastructure** for VMs.
 
-1. Open the GitHub repo. Show `base/vm-blue.yaml` (`runStrategy: Always`), `base/vm-green.yaml` (`runStrategy: Halted`), and `base/service-lb.yaml`.
+1. Open the GitHub repo. Show `chart/values.yaml` — note `blue.runStrategy: Always`, `green.runStrategy: Halted`, and `traffic.activeSlot: blue`. These values drive the Helm templates.
 2. Open the ArgoCD console. Show the `vm-demo` Application synced, with both VMs and the LB service in the resource tree.
 3. Show the VM states and MetalLB IP:
 
@@ -322,21 +335,30 @@ oc get vm -n vm-demo
 
 **Rollback (optional, high impact):**
 
+The rollback uses ArgoCD Helm parameter patches — no Git commits needed:
+
 ```bash
-# Step 1: start blue while traffic still flows to green
-yq e '.spec.runStrategy = "Always"' -i base/vm-blue.yaml
-git add base/vm-blue.yaml
-git commit -m "rollback: start blue standby"
-git push origin main
+# Step 1: Restart blue while traffic still flows to green
+oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":[
+    {"name":"blue.runStrategy","value":"Always"},
+    {"name":"green.runStrategy","value":"Always"},
+    {"name":"traffic.activeSlot","value":"green"}
+  ]}}}}'
+# Wait for ArgoCD sync and blue VM to be Ready
 
-# Wait until blue is Running, smoke-test it...
+# Step 2: Cutover back to blue and halt green
+oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":[
+    {"name":"blue.runStrategy","value":"Always"},
+    {"name":"green.runStrategy","value":"Halted"},
+    {"name":"traffic.activeSlot","value":"blue"}
+  ]}}}}'
 
-# Step 2: revert cutover commit and halt green
-git revert <cutover-commit-sha> --no-commit
-yq e '.spec.runStrategy = "Halted"' -i base/vm-green.yaml
-git add base/
-git commit -m "rollback: route traffic back to blue"
-git push origin main
+# Step 3: Delete green resources and clear overrides
+oc delete vm demo-vm-green datavolume centos10-green pvc centos10-green -n vm-demo
+oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
 
 curl http://$LB_IP/
 # <h1>Demo App v1.0 — served by demo-vm-blue</h1>
@@ -396,11 +418,18 @@ oc get pipeline install-app upgrade-app -n vm-demo
 ### Reset Between Runs
 
 ```bash
-yq e '.spec.runStrategy = "Always"' -i base/vm-blue.yaml
-yq e '.spec.runStrategy = "Halted"' -i base/vm-green.yaml
-yq e '.spec.selector["kubevirt.io/domain"] = "demo-vm-blue"' -i base/service-lb.yaml
-git add base/ && git commit -m "reset demo state" && git push origin main
-# ArgoCD syncs → cluster matches initial state in ~30 seconds
+# Reset app version to v1.0
+sed -i 's/version: "v2.0"/version: "v1.0"/' gitops-vmware-virt-demo/pipelines/app-version.yaml
+git add gitops-vmware-virt-demo/pipelines/app-version.yaml
+git commit -m "chore: reset demo state to v1.0"
+git push origin main
+
+# Clear any ArgoCD Helm parameter overrides
+oc patch application.argoproj.io vm-demo -n vm-demo --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
+
+# ArgoCD syncs → cluster matches values.yaml defaults in ~30 seconds
+# (blue=Always, green=Halted, traffic=blue)
 ```
 
 ---

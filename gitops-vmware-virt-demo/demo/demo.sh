@@ -58,7 +58,7 @@ fi
 if [[ $_preflight_dirty -eq 1 ]]; then
   git -C "${REPO_ROOT}" add "${DEMO_DIR}/pipelines/app-version.yaml"
   git -C "${REPO_ROOT}" commit -m "chore: reset demo state to v1.0 before demo"
-  git -C "${REPO_ROOT}" pull --rebase origin main && git -C "${REPO_ROOT}" push origin main
+  git -C "${REPO_ROOT}" pull --rebase --autostash origin main && git -C "${REPO_ROOT}" push origin main
 fi
 
 ########################
@@ -432,11 +432,11 @@ Repeatable. Auditable. No shell history to clean up." 226
 wait
 clear
 
-comment "The install pipeline: wait for VM ready → Ansible installs nginx + v1.0 → smoke test."
+comment "The install pipeline: wait for VM ready → Ansible installs httpd + v1.0 → smoke test."
 pe "oc get pipelines.tekton.dev install-app -n ${NAMESPACE}"
 wait
 
-comment "Trigger the install — Ansible will install nginx and serve v1.0 on demo-vm-blue."
+comment "Trigger the install — Ansible will install httpd and serve v1.0 on demo-vm-blue."
 dbg_step "ACT 2 — creating install PipelineRun"
 INSTALL_PR=$(oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n ${NAMESPACE} -o name)
 INSTALL_PR_NAME=${INSTALL_PR##*/}
@@ -495,7 +495,7 @@ pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'bump app version to v2.0'"
-pe "git -C ${REPO_ROOT} pull --rebase origin main && git -C ${REPO_ROOT} push origin main"
+pe "git -C ${REPO_ROOT} pull --rebase --autostash origin main && git -C ${REPO_ROOT} push origin main"
 sync_argo_git "vm-demo-infra"
 wait
 clear
