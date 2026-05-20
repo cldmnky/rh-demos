@@ -706,10 +706,11 @@ pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
     {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
   ]}}}}'"
-sync_argo "vm-demo"
+pe "oc patch vm demo-vm-blue -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"runStrategy\":\"Always\"}}'"
 wait
 
-comment "ArgoCD synced — blue boots. Waiting for VMI to exist and reach Ready state."
+comment "Blue boots. Waiting for VMI to exist and reach Ready state."
 pei "until oc get vmi demo-vm-blue -n ${NAMESPACE} >/dev/null 2>&1; do sleep 3; done"
 pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120s"
 wait
@@ -723,19 +724,21 @@ pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
     {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
     {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
   ]}}}}'"
-sync_argo "vm-demo"
+pe "oc patch service demo-app-lb -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"selector\":{\"kubevirt.io/domain\":\"demo-vm-blue\"}}}'"
+pe "oc patch vm demo-vm-green -n ${NAMESPACE} --type=merge \
+  -p '{\"spec\":{\"runStrategy\":\"Halted\"}}'"
 wait
 
 comment "Step 3 — delete green, then clear overrides so values.yaml recreates it halted from the golden image."
 pe "oc delete vm demo-vm-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
 oc delete datavolume centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
 oc delete pvc centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false"
-# Wait for deletion before clearing overrides — avoids ArgoCD immediately recreating green.
-wait_for_green_deleted
 comment "Clear all Helm parameter overrides — values.yaml defaults take over (blue=Always, green=Halted, traffic=blue)."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":null}}}}'"
-sync_argo "vm-demo"
+wait_for_green_deleted
+pe "helm template vm-demo ${DEMO_DIR}/chart | oc apply -f -"
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
 wait

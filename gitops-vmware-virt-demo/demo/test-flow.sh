@@ -239,6 +239,22 @@ wait_for_lb_ip() {
   echo "LoadBalancer IP: ${LB_IP}"
 }
 
+wait_for_green_deleted() {
+  local deadline=$(( $(date +%s) + 120 ))
+
+  log "Waiting for green VM/DataVolume/PVC deletion"
+  until ! oc get vm demo-vm-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+        ! oc get datavolume centos10-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+        ! oc get pvc centos10-green -n "${NAMESPACE}" >/dev/null 2>&1; do
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for green resources to delete"
+      oc get vm,datavolume,pvc -n "${NAMESPACE}" || true
+      return 1
+    }
+    sleep 3
+  done
+}
+
 assert_green_uses_blue_snapshot() {
   local vm_snapshot="$1"
   local expected_snapshot
@@ -376,7 +392,8 @@ patch_vm_demo_parameters "[
   {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
   {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
 ]"
-sync_argo "vm-demo"
+run oc patch vm demo-vm-blue -n "${NAMESPACE}" --type=merge \
+  --patch '{"spec":{"runStrategy":"Always"}}'
 until oc get vmi demo-vm-blue -n "${NAMESPACE}" >/dev/null 2>&1; do sleep 3; done
 run oc wait vmi demo-vm-blue -n "${NAMESPACE}" --for=condition=Ready --timeout=120s
 
@@ -387,13 +404,17 @@ patch_vm_demo_parameters "[
   {\"name\":\"green.diskSnapshot.namespace\",\"value\":\"${ROLLBACK_GREEN_SNAPSHOT_NS}\"},
   {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
 ]"
-sync_argo "vm-demo"
+run oc patch service demo-app-lb -n "${NAMESPACE}" --type=merge \
+  --patch '{"spec":{"selector":{"kubevirt.io/domain":"demo-vm-blue"}}}'
+run oc patch vm demo-vm-green -n "${NAMESPACE}" --type=merge \
+  --patch '{"spec":{"runStrategy":"Halted"}}'
 
 run oc delete vm demo-vm-green -n "${NAMESPACE}" --ignore-not-found --wait=false
 run oc delete datavolume centos10-green -n "${NAMESPACE}" --ignore-not-found --wait=false
 run oc delete pvc centos10-green -n "${NAMESPACE}" --ignore-not-found --wait=false
 patch_vm_demo_parameters "null"
-sync_argo "vm-demo"
+wait_for_green_deleted
+helm template vm-demo "${DEMO_ROOT}/chart" | oc apply -f -
 
 run oc get vm,vmi -n "${NAMESPACE}"
 run oc get svc demo-app-lb -n "${NAMESPACE}" -o jsonpath='{.spec.selector}{"\n"}'
