@@ -17,6 +17,7 @@ NAMESPACE="${NAMESPACE:-vm-demo}"
 ARGOCD_NS="${ARGOCD_NS:-openshift-gitops}"
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
+ARGO_SYNC_TIMEOUT="${ARGO_SYNC_TIMEOUT:-600}"
 METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_ROOT}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
 LB_IP=""
 
@@ -68,7 +69,7 @@ sync_argo() {
     --type merge \
     --patch '{"operation":{"initiatedBy":{"username":"test-flow"},"sync":{"prune":true}}}'
 
-  deadline=$(( $(date +%s) + 300 ))
+  deadline=$(( $(date +%s) + ARGO_SYNC_TIMEOUT ))
   while true; do
     finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || true)
@@ -106,7 +107,7 @@ sync_argo_git() {
     --type merge \
     --patch '{"operation":{"initiatedBy":{"username":"test-flow"},"sync":{"prune":true}}}'
 
-  deadline=$(( $(date +%s) + 300 ))
+  deadline=$(( $(date +%s) + ARGO_SYNC_TIMEOUT ))
   while true; do
     current_revision=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
@@ -143,7 +144,7 @@ wait_argo_git() {
   revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
   log "Waiting for ArgoCD Application ${app} to reach Git revision ${revision:0:7}"
 
-  deadline=$(( $(date +%s) + 300 ))
+  deadline=$(( $(date +%s) + ARGO_SYNC_TIMEOUT ))
   while true; do
     current_revision=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)

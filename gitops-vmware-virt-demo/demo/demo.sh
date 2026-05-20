@@ -17,6 +17,7 @@
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 DEMO_DIR="gitops-vmware-virt-demo"
+DEMO_ROOT="${REPO_ROOT}/${DEMO_DIR}"
 
 # ── Strip --debug from $@ before demo-magic's getopts sees it ────
 _DEMO_ARGS=()
@@ -38,35 +39,13 @@ unset _DEMO_ARGS _a
 cd "${REPO_ROOT}"
 
 ########################
-# pre-flight: reset state that may be left over from a previous demo run
+# config
 ########################
 NAMESPACE="vm-demo"
 ARGOCD_NS="openshift-gitops"
-_preflight_dirty=0
-
-# Clear any runtime Helm parameter overrides left from a previous pipeline/rollback run.
-# (This is always safe — parameters=null falls back to values.yaml defaults.)
-oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":null}}}}' >/dev/null 2>&1 || true
-
-if ! grep -q 'version: "v1.0"' "${DEMO_DIR}/pipelines/app-version.yaml"; then
-  echo "⚠️  app-version.yaml is not v1.0 — resetting."
-  sed -i '' 's/version: "v2.0"/version: "v1.0"/' "${DEMO_DIR}/pipelines/app-version.yaml"
-  _preflight_dirty=1
-fi
-
-if [[ $_preflight_dirty -eq 1 ]]; then
-  git -C "${REPO_ROOT}" add "${DEMO_DIR}/pipelines/app-version.yaml"
-  git -C "${REPO_ROOT}" commit -m "chore: reset demo state to v1.0 before demo"
-  git -C "${REPO_ROOT}" pull --rebase --autostash origin main && git -C "${REPO_ROOT}" push origin main
-fi
-
-########################
-# config
-########################
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
-METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_DIR}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
+METALLB_POOL=$(awk -F': ' '/metallb.universe.tf\/address-pool/ {print $2}' "${DEMO_ROOT}/chart/templates/service-lb.yaml" | head -1 | tr -d ' "')
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after LB is ready
@@ -93,70 +72,169 @@ function comment() {
   echo "$1" | gum style --italic --foreground=245 --padding="0 2"
 }
 
+# set_app_version: idempotent replacement of version string in app-version.yaml
+function set_app_version() {
+  local version="$1"
+  ruby -0pi -e "gsub(/version: \"v[0-9.]+\"/, 'version: \"${version}\"')" \
+    "${DEMO_ROOT}/pipelines/app-version.yaml"
+}
+
+# commit_and_push_if_changed: only commits if there are staged changes; uses --autostash on rebase
+function commit_and_push_if_changed() {
+  local message="$1"
+  shift
+  git -C "${REPO_ROOT}" add "$@"
+  if git -C "${REPO_ROOT}" diff --cached --quiet; then
+    return 0
+  fi
+  git -C "${REPO_ROOT}" commit -m "${message}"
+  git -C "${REPO_ROOT}" pull --rebase --autostash origin main
+  git -C "${REPO_ROOT}" push origin main
+}
+
+# patch_vm_demo_parameters: applies Helm parameter overrides on the vm-demo ArgoCD Application
+function patch_vm_demo_parameters() {
+  local parameters_json="$1"
+  oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
+    --patch "{\"spec\":{\"source\":{\"helm\":{\"parameters\":${parameters_json}}}}}" \
+    >/dev/null 2>&1
+}
+
+# sync_argo: trigger a sync and wait for a *new* operation to Succeed/Fail (with deadline)
 function sync_argo() {
   local app="$1"
+  local old_finished deadline phase finished health message
 
   comment "Triggering ArgoCD sync for ${app}..."
 
-  # Clear a stale top-level operation if ArgoCD automated sync/selfHeal already started one.
+  # Clear a stale top-level operation if one exists.
   oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
     --type=json \
     -p '[{"op":"remove","path":"/operation"}]' \
-    > /dev/null 2>&1 || true
+    >/dev/null 2>&1 || true
 
   # Record current finishedAt so we can detect when a NEW operation completes.
-  local old_finished
   old_finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
     -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
 
   oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
     --type merge \
     --patch '{"operation":{"initiatedBy":{"username":"demo"},"sync":{"prune":true}}}' \
-    > /dev/null 2>&1
+    >/dev/null 2>&1
 
-  local deadline=$(( $(date +%s) + 300 ))
-  until [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-        -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${old_finished}" ]] && \
-        [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-        -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
-    [[ "$(date +%s)" -gt "${deadline}" ]] && { echo "⏱️  Timeout waiting for ${app} sync"; return 1; }
+  deadline=$(( $(date +%s) + 300 ))
+  while true; do
+    finished=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || true)
+    phase=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+
+    if [[ "${finished}" != "${old_finished}" && "${phase}" == "Succeeded" ]]; then
+      break
+    fi
+    if [[ "${finished}" != "${old_finished}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app}: ${message}"
+      return 1
+    fi
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for ${app} sync"
+      return 1
+    }
     sleep 3
   done
 
-  local health
   health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
     -o jsonpath='{.status.health.status}' 2>/dev/null)
   echo "✅ ${app}: Synced / ${health}"
 }
 
-# SHA-based sync wait — use for Git-committed changes (e.g. vm-demo-infra after push).
+# sync_argo_git: trigger a sync and wait until the app is at the current HEAD SHA (with deadline + failure detection)
 function sync_argo_git() {
   local app="$1"
-  local revision
+  local revision deadline sync_status health current_revision phase message
+
   revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
 
   comment "Triggering ArgoCD sync for ${app} @ ${revision:0:7}..."
   oc patch application.argoproj.io "${app}" -n "${NAMESPACE}" \
     --type merge \
     --patch '{"operation":{"initiatedBy":{"username":"demo"},"sync":{"prune":true}}}' \
-    > /dev/null 2>&1
+    >/dev/null 2>&1
 
-  until [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.sync.revision}' 2>/dev/null)" == "${revision}" ]] && \
-    [[ "$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
-      -o jsonpath='{.status.sync.status}' 2>/dev/null)" == "Synced" ]]; do
+  deadline=$(( $(date +%s) + 300 ))
+  while true; do
+    current_revision=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
+    sync_status=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+
+    if [[ "${current_revision}" == "${revision}" && "${sync_status}" == "Synced" ]]; then
+      break
+    fi
+    phase=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+    if [[ "${current_revision}" == "${revision}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app} at ${revision}: ${message}"
+      return 1
+    fi
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for ${app} to sync to ${revision}"
+      return 1
+    }
+    sleep 3
+  done
+
+  health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.health.status}' 2>/dev/null)
+  echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
+}
+
+# wait_argo_git: wait (without triggering a sync) for ArgoCD to reach HEAD on its own
+function wait_argo_git() {
+  local app="$1"
+  local revision deadline sync_status current_revision phase message
+
+  revision=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+  comment "Waiting for ArgoCD Application ${app} to reach ${revision:0:7}..."
+
+  deadline=$(( $(date +%s) + 300 ))
+  while true; do
+    current_revision=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.revision}' 2>/dev/null || true)
+    sync_status=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+
+    if [[ "${current_revision}" == "${revision}" && "${sync_status}" == "Synced" ]]; then
+      break
+    fi
+    phase=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+      -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+    if [[ "${current_revision}" == "${revision}" && "${phase}" == "Failed" ]]; then
+      message=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)
+      echo "ArgoCD sync failed for ${app} at ${revision}: ${message}"
+      return 1
+    fi
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for ${app} to reach ${revision}"
+      return 1
+    }
     sleep 3
   done
 
   local health
   health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
     -o jsonpath='{.status.health.status}' 2>/dev/null)
-  echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
+  echo "✅ ${app}: reached ${revision:0:7} / ${health}"
 }
 
 function wait_for_pr() {
   local pr_name="$1"
-  local timeout="${2:-600}"
+  local timeout="${2:-900}"
   local waited=0
 
   comment "Waiting for PipelineRun ${pr_name} to complete..."
@@ -172,11 +250,72 @@ function wait_for_pr() {
       *)
         sleep 5
         (( waited += 5 ))
-        [[ $waited -ge $timeout ]] && echo "⏱️  Timeout waiting for ${pr_name}" && return 1
+        [[ $waited -ge $timeout ]] && {
+          echo "Timed out waiting for ${pr_name}"
+          oc get pipelinerun,taskrun -n "${NAMESPACE}" || true
+          return 1
+        }
         ;;
     esac
   done
 }
+
+function wait_for_blue_running() {
+  local deadline=$(( $(date +%s) + 600 ))
+
+  comment "Waiting for blue VM to be Running..."
+  until oc get vm demo-vm-blue -n "${NAMESPACE}" \
+      -o jsonpath='{.status.printableStatus}' 2>/dev/null | grep -q "Running"; do
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for demo-vm-blue to run"
+      oc get vm,vmi,dv,pvc -n "${NAMESPACE}" || true
+      return 1
+    }
+    sleep 5
+  done
+}
+
+function wait_for_lb_ip() {
+  local deadline=$(( $(date +%s) + 300 ))
+
+  comment "Waiting for LoadBalancer IP..."
+  until LB_IP=$(oc get svc demo-app-lb -n "${NAMESPACE}" \
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) && [[ -n "${LB_IP}" ]]; do
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for demo-app-lb external IP"
+      oc get svc demo-app-lb -n "${NAMESPACE}" || true
+      return 1
+    }
+    sleep 5
+  done
+}
+
+function wait_for_green_deleted() {
+  local deadline=$(( $(date +%s) + 120 ))
+
+  comment "Waiting for green VM and disk resources to be deleted..."
+  until ! oc get vm demo-vm-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+        ! oc get datavolume centos10-green -n "${NAMESPACE}" >/dev/null 2>&1 && \
+        ! oc get pvc centos10-green -n "${NAMESPACE}" >/dev/null 2>&1; do
+    [[ "$(date +%s)" -gt "${deadline}" ]] && {
+      echo "Timed out waiting for green resources to delete"
+      return 1
+    }
+    sleep 3
+  done
+}
+
+########################
+# pre-flight: reset state that may be left over from a previous demo run (hidden from audience)
+########################
+# Clear any runtime Helm parameter overrides left from a previous pipeline/rollback run.
+oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":null}}}}' >/dev/null 2>&1 || true
+
+# Reset app version to v1.0 idempotently and push only if needed.
+set_app_version "v1.0"
+commit_and_push_if_changed "chore: reset demo state to v1.0 before demo" \
+  "${DEMO_DIR}/pipelines/app-version.yaml"
 
 ##############################################################
 # INTRO
@@ -223,7 +362,9 @@ wait
 
 comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the cloud-user's authorized_keys."
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
-# Write to a file — pe/eval collapses multi-line --from-literal strings into invalid YAML
+# Write to a temp file — pe/eval collapses multi-line --from-literal strings into invalid YAML
+cloud_init_file=$(mktemp)
+trap 'rm -f "${cloud_init_file}"' EXIT
 {
   printf '#cloud-config\n'
   printf 'users:\n'
@@ -235,12 +376,12 @@ PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
   printf '  list: |\n'
   printf '    cloud-user:redhat\n'
   printf '  expire: false\n'
-} > /tmp/vm-cloud-init.yaml
+} > "${cloud_init_file}"
 comment "Here is the cloud-init we just generated:"
-pe "cat /tmp/vm-cloud-init.yaml"
+pe "cat ${cloud_init_file}"
 wait
 pe "oc create secret generic vm-cloud-init \
-  --from-file=userdata=/tmp/vm-cloud-init.yaml \
+  --from-file=userdata=${cloud_init_file} \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
 wait
@@ -326,7 +467,8 @@ Let's watch it work." 117
 wait
 
 pe "oc get applications.argoproj.io -n ${NAMESPACE}"
-sync_argo "vm-demo"
+# Wait for vm-demo to self-sync (selfHeal) then explicitly sync infra.
+wait_argo_git "vm-demo"
 sync_argo_git "vm-demo-infra"
 dbg_run oc get applications.argoproj.io -n ${NAMESPACE} -o wide
 dbg_run oc get all -n ${NAMESPACE}
@@ -339,7 +481,7 @@ clear
 dbg_step "SETUP — waiting for VMs"
 say "Waiting for VMs...
 
-ArgoCD has applied the VirtualMachine manifests from Git.
+ArgoCD has applied the VirtualMachine manifests from the Helm chart.
 CDI is now cloning the CentOS Stream 10 golden image into two DataVolumes.
 
 Blue will come up Running.
@@ -349,10 +491,7 @@ clear
 
 pe "oc get vm -n ${NAMESPACE} -w &"
 WATCH_PID=$!
-until oc get vm demo-vm-blue -n "${NAMESPACE}" \
-    -o jsonpath='{.status.printableStatus}' 2>/dev/null | grep -q "Running"; do
-  sleep 5
-done
+wait_for_blue_running
 kill $WATCH_PID 2>/dev/null
 pei ""
 pe "oc get vm -n ${NAMESPACE}"
@@ -362,11 +501,8 @@ wait
 
 comment "MetalLB has assigned a real external IP from our address pool."
 pe "oc get svc demo-app-lb -n ${NAMESPACE}"
+wait_for_lb_ip
 wait
-until LB_IP=$(oc get svc demo-app-lb -n "${NAMESPACE}" \
-    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) && [[ -n "${LB_IP}" ]]; do
-  sleep 5
-done
 
 say "The cluster now exactly matches Git.
 Blue running. Green halted at zero cost.
@@ -489,7 +625,7 @@ say "The upgrade pipeline — one Git commit triggers it; everything else goes d
 wait
 clear
 
-comment "Bump the app version and push — ArgoCD and the upgrade pipeline are triggered explicitly."
+comment "Bump the app version and push — the upgrade pipeline is triggered manually below."
 pe "sed -i '' 's/version: \"v1.0\"/version: \"v2.0\"/' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
@@ -509,14 +645,14 @@ pe "echo ${UPGRADE_PR}"
 wait
 clear
 
-comment "Streaming upgrade-app logs. ArgoCD syncs are triggered inside the pipeline after each git commit."
+comment "Streaming upgrade-app logs. ArgoCD syncs are triggered inside the pipeline after each parameter patch."
 dbg_step "ACT 3 — streaming upgrade-app logs ${UPGRADE_PR_NAME}"
 pei "oc logs -f -n ${NAMESPACE} -l tekton.dev/pipeline=upgrade-app --tail=-1 --prefix"
 dbg_step "ACT 3 — waiting for upgrade PipelineRun to complete"
 wait_for_pr "${UPGRADE_PR_NAME}"
 dbg_run oc get pipelinerun,taskrun -n ${NAMESPACE}
 dbg_run oc get vm,vmi -n ${NAMESPACE}
-dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\\n"}'
+dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
 dbg_run oc get virtualmachinesnapshot -n ${NAMESPACE}
 wait
 clear
@@ -526,7 +662,7 @@ pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
   -o jsonpath='{.spec.source.helm.parameters}' | python3 -m json.tool"
 wait
 
-comment "Traffic has moved. Service selector updated by Tekton's git commit → ArgoCD reconcile."
+comment "Traffic has moved. Service selector updated by ArgoCD after the parameter patch."
 pe "oc get svc demo-app-lb -n ${NAMESPACE} \
   -o jsonpath='{.spec.selector}' && echo"
 wait
@@ -552,14 +688,16 @@ Here: patch ArgoCD parameters. No Git commits. ArgoCD reconciles. Done."
 wait
 clear
 
-comment "Step 1 — restart blue while traffic still flows to green. Zero downtime."
-comment "We patch ArgoCD parameters directly — no Git commit needed."
+# Capture the current green disk snapshot parameters for use in rollback patches.
 ROLLBACK_GREEN_SNAPSHOT_NAME=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
   -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.diskSnapshot.name")].value}' 2>/dev/null || true)
 ROLLBACK_GREEN_SNAPSHOT_NS=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
   -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.diskSnapshot.namespace")].value}' 2>/dev/null || true)
 ROLLBACK_GREEN_SNAPSHOT_NAME=${ROLLBACK_GREEN_SNAPSHOT_NAME:-centos-stream10-8a1243274fb1}
 ROLLBACK_GREEN_SNAPSHOT_NS=${ROLLBACK_GREEN_SNAPSHOT_NS:-openshift-virtualization-os-images}
+
+comment "Step 1 — restart blue while traffic still flows to green. Zero downtime."
+comment "We patch ArgoCD parameters directly — no Git commit needed."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
     {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
@@ -576,7 +714,7 @@ pei "until oc get vmi demo-vm-blue -n ${NAMESPACE} >/dev/null 2>&1; do sleep 3; 
 pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120s"
 wait
 
-comment "Step 2 — move traffic back to blue and halt green, preserving green's current disk source."
+comment "Step 2 — move traffic back to blue and halt green."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
     {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
@@ -592,6 +730,8 @@ comment "Step 3 — delete green, then clear overrides so values.yaml recreates 
 pe "oc delete vm demo-vm-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
 oc delete datavolume centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false && \
 oc delete pvc centos10-green -n ${NAMESPACE} --ignore-not-found --wait=false"
+# Wait for deletion before clearing overrides — avoids ArgoCD immediately recreating green.
+wait_for_green_deleted
 comment "Clear all Helm parameter overrides — values.yaml defaults take over (blue=Always, green=Halted, traffic=blue)."
 pe "oc patch application.argoproj.io vm-demo -n ${NAMESPACE} --type=merge \
   -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":null}}}}'"
