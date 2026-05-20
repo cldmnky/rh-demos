@@ -17,35 +17,35 @@ spec:
       description: "SSH private key secret (key: id_rsa)"
   tasks:
     # [1] Safety net: snapshot blue before touching anything
-    # Uses openshift-client task via cluster resolver (no snapshot task in kubevirt-tekton-tasks)
     - name: snapshot-blue
-      taskRef:
-        resolver: cluster
+      taskSpec:
         params:
-          - name: kind
-            value: task
-          - name: name
-            value: openshift-client
-          - name: namespace
-            value: openshift-pipelines
+          - name: run-id
+            type: string
+        steps:
+          - name: snapshot
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+              cat <<EOF | oc apply -f -
+              apiVersion: snapshot.kubevirt.io/v1beta1
+              kind: VirtualMachineSnapshot
+              metadata:
+                name: blue-pre-upgrade-$(params.run-id)
+                namespace: vm-demo
+              spec:
+                source:
+                  apiGroup: kubevirt.io
+                  kind: VirtualMachine
+                  name: demo-vm-blue
+              EOF
+              oc wait --for=condition=Ready \
+                virtualmachinesnapshot/blue-pre-upgrade-$(params.run-id) \
+                -n vm-demo --timeout=300s
       params:
-        - name: SCRIPT
-          value: |
-            cat <<EOF | oc apply -f -
-            apiVersion: snapshot.kubevirt.io/v1beta1
-            kind: VirtualMachineSnapshot
-            metadata:
-              name: blue-pre-upgrade-$(params.run-id)
-              namespace: vm-demo
-            spec:
-              source:
-                apiGroup: kubevirt.io
-                kind: VirtualMachine
-                name: demo-vm-blue
-            EOF
-            oc wait --for=condition=Ready \
-              virtualmachinesnapshot/blue-pre-upgrade-$(params.run-id) \
-              -n vm-demo --timeout=300s
+        - name: run-id
+          value: $(params.run-id)
 
     # [2] Git commit: start green VM
     - name: git-start-green
@@ -71,26 +71,21 @@ spec:
     - name: sync-argo-start-green
       runAfter:
         - git-start-green
-      taskRef:
-        resolver: cluster
-        params:
-          - name: kind
-            value: task
-          - name: name
-            value: openshift-client
-          - name: namespace
-            value: openshift-pipelines
-      params:
-        - name: SCRIPT
-          value: |
-            oc patch application.argoproj.io vm-demo -n vm-demo \
-              --type merge \
-              --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-            until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                -o jsonpath='{.status.sync.status}')" == "Synced" ]]; do
-              sleep 3
-            done
-            echo "ArgoCD synced vm-demo — green VM start committed"
+      taskSpec:
+        steps:
+          - name: sync
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+              oc patch application.argoproj.io vm-demo -n vm-demo \
+                --type merge \
+                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
+              until [[ "\$(oc get application.argoproj.io vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.status}' 2>/dev/null)" == "Synced" ]]; do
+                sleep 3
+              done
+              echo "ArgoCD synced vm-demo — green VM start committed"
 
     # [4] Wait for green VMI to reach Running phase
     - name: wait-for-green
@@ -194,26 +189,21 @@ spec:
     - name: sync-argo-cutover
       runAfter:
         - git-cutover
-      taskRef:
-        resolver: cluster
-        params:
-          - name: kind
-            value: task
-          - name: name
-            value: openshift-client
-          - name: namespace
-            value: openshift-pipelines
-      params:
-        - name: SCRIPT
-          value: |
-            oc patch application.argoproj.io vm-demo -n vm-demo \
-              --type merge \
-              --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-            until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                -o jsonpath='{.status.sync.status}')" == "Synced" ]]; do
-              sleep 3
-            done
-            echo "ArgoCD synced vm-demo — cutover complete, traffic on green"
+      taskSpec:
+        steps:
+          - name: sync
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+              oc patch application.argoproj.io vm-demo -n vm-demo \
+                --type merge \
+                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
+              until [[ "\$(oc get application.argoproj.io vm-demo -n vm-demo \
+                  -o jsonpath='{.status.sync.status}' 2>/dev/null)" == "Synced" ]]; do
+                sleep 3
+              done
+              echo "ArgoCD synced vm-demo — cutover complete, traffic on green"
 
   # [6-FAIL] If smoke-test fails, halt green and leave blue untouched
   finally:

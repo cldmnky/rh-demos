@@ -98,7 +98,11 @@ function sync_argo() {
   local health
   health=$(oc get application.argoproj.io "${app}" -n "${NAMESPACE}" \
       -o jsonpath='{.status.health.status}' 2>/dev/null)
-  echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
+  if [[ "$health" == "Suspended" ]]; then
+    echo "✅ ${app}: Synced @ ${revision:0:7} / Suspended (vm-green is Halted — expected)"
+  else
+    echo "✅ ${app}: Synced @ ${revision:0:7} / ${health}"
+  fi
 }
 
 function wait_for_pr() {
@@ -183,6 +187,9 @@ PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
   printf '    cloud-user:redhat\n'
   printf '  expire: false\n'
 } > /tmp/vm-cloud-init.yaml
+comment "Here is the cloud-init we just generated:"
+pe "cat /tmp/vm-cloud-init.yaml"
+wait
 pe "oc create secret generic vm-cloud-init \
   --from-file=userdata=/tmp/vm-cloud-init.yaml \
   --namespace=${NAMESPACE} \
@@ -502,15 +509,19 @@ pe "oc wait vmi demo-vm-blue -n ${NAMESPACE} --for=condition=Ready --timeout=120
 wait
 
 comment "Step 2 — revert the cutover commit: traffic returns to blue, green halts."
-CUTOVER_SHA=$(git -C "${REPO_ROOT}" log --oneline -- "${DEMO_DIR}/base/service-lb.yaml" | head -1 | awk '{print $1}')
-pe "git -C ${REPO_ROOT} revert ${CUTOVER_SHA} --no-edit"
-pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
-pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-green.yaml"
-pe "git -C ${REPO_ROOT} commit --amend --no-edit"
-pe "git -C ${REPO_ROOT} push --force-with-lease origin main"
-sync_argo "vm-demo"
-dbg_run oc get vm,vmi -n ${NAMESPACE}
-dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\\n"}'
+CUTOVER_SHA=$(git -C "${REPO_ROOT}" log --oneline --grep='\[upgrade-pipeline\] cutover' | head -1 | awk '{print $1}')
+if [[ -z "$CUTOVER_SHA" ]]; then
+  echo "⚠️  No [upgrade-pipeline] cutover commit found in git log — cannot revert automatically."
+else
+  pe "git -C ${REPO_ROOT} revert ${CUTOVER_SHA} --no-edit"
+  pe "yq e '.spec.runStrategy = \"Halted\"' -i ${DEMO_DIR}/base/vm-green.yaml"
+  pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/base/vm-green.yaml"
+  pe "git -C ${REPO_ROOT} commit --amend --no-edit"
+  pe "git -C ${REPO_ROOT} push --force-with-lease origin main"
+  sync_argo "vm-demo"
+  dbg_run oc get vm,vmi -n ${NAMESPACE}
+  dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
+fi
 wait
 pe "curl -s http://${LB_IP}/"
 wait

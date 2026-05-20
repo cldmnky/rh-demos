@@ -42,6 +42,10 @@ set -x
 # ── ERR trap — log failures ───────────────────────────────────────
 _dbg_err() {
   local rc=$? line=${BASH_LINENO[0]} src=${BASH_SOURCE[1]:-?} fn=${FUNCNAME[1]:-main}
+  # exit 142 = read -t timeout used by demo-magic wait() — not an error
+  [[ $rc -eq 142 ]] && return
+  # read returning non-zero is always a timeout/EOF, never a real failure
+  [[ "${BASH_COMMAND}" == read* ]] && return
   printf '\n❌  ERROR  exit=%d  %s:%d  %s()\n    cmd : %s\n\n' \
     "$rc" "${src##*/}" "$line" "$fn" "${BASH_COMMAND}" >&9
 }

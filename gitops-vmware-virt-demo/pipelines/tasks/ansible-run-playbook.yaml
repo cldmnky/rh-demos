@@ -17,12 +17,15 @@ spec:
       description: "Secret volume containing the SSH private key at id_rsa"
   steps:
     - name: run-ansible
-      image: ghcr.io/ansible/community-ansible-dev-tools:latest
-      # Pass playbook content via env to avoid shell-escaping issues;
-      # Tekton substitutes $(params.playbook-content) at the env-value level.
+      # quay.io/ansible/awx-ee is the AWX default EE — pullable without auth.
+      # ghcr.io/ansible/community-ansible-dev-tools is not always reachable.
+      # Set HOME=/tmp so Ansible can create ~/.ansible/tmp on OpenShift (non-root).
+      image: quay.io/ansible/awx-ee:latest
       env:
         - name: PLAYBOOK_CONTENT
           value: $(params.playbook-content)
+        - name: HOME
+          value: /tmp
       script: |
         #!/bin/bash
         set -eu
