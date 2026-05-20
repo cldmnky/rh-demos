@@ -112,30 +112,23 @@ spec:
               done
               echo "Green VM and DataVolume deleted."
 
-              # Clear any automated/selfHeal operation before starting our explicit sync.
-              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
-                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+              # Ask ArgoCD to refresh and wait for the concrete child resource.
+              # Waiting on Application operationState is brittle when automated selfHeal is active.
+              oc annotate application.argoproj.io vm-demo -n vm-demo \
+                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 
-              # Record current operationState.finishedAt to detect when a NEW sync completes.
-              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
-                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
-
-              # Trigger sync — ArgoCD renders chart with new parameters → creates green from snapshot.
-              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
-                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-
-              echo "Waiting for ArgoCD sync to complete (green VM starting from ${VM_SNAPSHOT}/${SNAPSHOT})..."
-              DEADLINE=$(( $(date +%s) + 300 ))
-              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
-                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
-                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+              echo "Waiting for green VM to be rendered from ${VM_SNAPSHOT}/${SNAPSHOT}..."
+              DEADLINE=$(( $(date +%s) + 600 ))
+              until [[ "$(oc get vm demo-vm-green -n vm-demo \
+                    -o jsonpath='{.spec.runStrategy}' 2>/dev/null)" == "Always" ]] && \
+                    [[ "$(oc get vm demo-vm-green -n vm-demo \
+                    -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}' 2>/dev/null)" == "${SNAPSHOT}" ]]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green VM from snapshot"; exit 1; }
                 echo -n '.'
                 sleep 5
               done
               echo ""
-              echo "ArgoCD synced — green VM created from rootdisk VolumeSnapshot ${SNAPSHOT}"
+              echo "Green VM rendered from rootdisk VolumeSnapshot ${SNAPSHOT}"
       params:
         - name: run-id
           value: $(params.run-id)
@@ -255,27 +248,21 @@ spec:
                     {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
                   ]}}}}"
 
-              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
-                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+              oc annotate application.argoproj.io vm-demo -n vm-demo \
+                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 
-              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
-                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
-
-              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
-                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-
-              echo "Waiting for ArgoCD sync to complete (traffic → green, blue → Halted)..."
-              DEADLINE=$(( $(date +%s) + 300 ))
-              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
-                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
-                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+              echo "Waiting for cutover (traffic → green, blue → Halted)..."
+              DEADLINE=$(( $(date +%s) + 600 ))
+              until [[ "$(oc get svc demo-app-lb -n vm-demo \
+                    -o jsonpath='{.spec.selector}' 2>/dev/null)" == *"demo-vm-green"* ]] && \
+                    [[ "$(oc get vm demo-vm-blue -n vm-demo \
+                    -o jsonpath='{.spec.runStrategy}' 2>/dev/null)" == "Halted" ]]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for cutover"; exit 1; }
                 echo -n '.'
                 sleep 5
               done
               echo ""
-              echo "ArgoCD synced — cutover complete, traffic on green, blue halted"
+              echo "Cutover complete — traffic on green, blue halted"
       params:
         - name: run-id
           value: $(params.run-id)
@@ -319,24 +306,18 @@ spec:
                     {"name":"traffic.activeSlot","value":"blue"}
                   ]}}}}'
 
-              oc patch application.argoproj.io vm-demo -n vm-demo --type=json \
-                -p '[{"op":"remove","path":"/operation"}]' >/dev/null 2>&1 || true
+              oc annotate application.argoproj.io vm-demo -n vm-demo \
+                argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 
-              OLD_FINISHED=$(oc get application.argoproj.io vm-demo -n vm-demo \
-                -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null || echo "")
-
-              oc patch application.argoproj.io vm-demo -n vm-demo --type merge \
-                --patch '{"operation":{"initiatedBy":{"username":"upgrade-pipeline"},"sync":{"prune":true}}}'
-
-              DEADLINE=$(( $(date +%s) + 300 ))
-              until [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.finishedAt}' 2>/dev/null)" != "${OLD_FINISHED}" ]] && \
-                    [[ "$(oc get application.argoproj.io vm-demo -n vm-demo \
-                    -o jsonpath='{.status.operationState.phase}' 2>/dev/null)" == "Succeeded" ]]; do
-                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for ArgoCD sync"; exit 1; }
+              DEADLINE=$(( $(date +%s) + 600 ))
+              until [[ "$(oc get svc demo-app-lb -n vm-demo \
+                    -o jsonpath='{.spec.selector}' 2>/dev/null)" == *"demo-vm-blue"* ]] && \
+                    [[ "$(oc get vm demo-vm-green -n vm-demo \
+                    -o jsonpath='{.spec.runStrategy}' 2>/dev/null)" == "Halted" ]]; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green halt"; exit 1; }
                 sleep 5
               done
-              echo "ArgoCD synced — green halted, blue still running, users unaffected"
+              echo "Green halted, blue still running, users unaffected"
       params:
         - name: run-id
           value: $(params.run-id)
