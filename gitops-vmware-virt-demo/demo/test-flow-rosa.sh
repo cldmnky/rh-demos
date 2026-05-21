@@ -249,6 +249,13 @@ wait_for_lb_ip() {
   echo "LoadBalancer endpoint: ${LB_IP}"
 }
 
+curl_lb() {
+  local url="$1"
+  curl --fail --show-error --silent \
+    --retry 12 --retry-delay 5 --retry-all-errors \
+    "${url}"
+}
+
 verify_rosa_prereqs() {
   local current_snapshot snapshot_ns
 
@@ -410,7 +417,7 @@ INSTALL_PR=$(oc create -f "${DEMO_ROOT}/pipelines/install-pipelinerun.yaml" -n "
 INSTALL_PR_NAME=${INSTALL_PR##*/}
 echo "Created ${INSTALL_PR}"
 wait_for_pr "${INSTALL_PR_NAME}"
-run curl -fsS "http://${LB_IP}/"
+run curl_lb "http://${LB_IP}/"
 
 log "Bump app version to v2.0 and sync pipeline infra"
 set_app_version "v2.0"
@@ -428,7 +435,7 @@ assert_green_uses_blue_snapshot "${EXPECTED_SNAPSHOT}"
 
 run oc get vm,vmi -n "${NAMESPACE}"
 run oc get svc demo-app-lb -n "${NAMESPACE}" -o jsonpath='{.spec.selector}{"\n"}'
-run curl -fsS "http://${LB_IP}/"
+run curl_lb "http://${LB_IP}/"
 
 log "Rollback using ArgoCD parameter patches"
 ROLLBACK_GREEN_SNAPSHOT_NAME=$(oc get application.argoproj.io vm-demo -n "${NAMESPACE}" \
@@ -470,6 +477,6 @@ wait_for_green_reset
 
 run oc get vm,vmi -n "${NAMESPACE}"
 run oc get svc demo-app-lb -n "${NAMESPACE}" -o jsonpath='{.spec.selector}{"\n"}'
-run curl -fsS "http://${LB_IP}/"
+run curl_lb "http://${LB_IP}/"
 
 log "End-to-end flow completed successfully"

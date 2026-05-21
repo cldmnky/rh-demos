@@ -301,6 +301,10 @@ function wait_for_lb_ip() {
   done
 }
 
+function curl_lb_command() {
+  printf 'curl --retry 12 --retry-delay 5 --retry-all-errors -s http://%s/' "${LB_IP}"
+}
+
 function wait_for_green_reset() {
   local deadline=$(( $(date +%s) + 120 ))
   local parameters selector run_strategy source_name source_namespace
@@ -641,7 +645,7 @@ dbg_run oc get vm,vmi -n ${NAMESPACE}
 wait
 clear
 
-pe "curl -s http://${LB_IP}/"
+pe "$(curl_lb_command)"
 wait
 
 say "v1.0 is live on demo-vm-blue.
@@ -742,7 +746,7 @@ pe "oc get svc demo-app-lb -n ${NAMESPACE} \
 wait
 pe "oc get vm -n ${NAMESPACE}"
 wait
-pe "curl -s http://${LB_IP}/"
+pe "$(curl_lb_command)"
 wait
 
 say "One Git commit — the version bump — triggered the pipeline.
@@ -815,7 +819,7 @@ wait_for_green_reset
 dbg_run oc get vm,vmi -n ${NAMESPACE}
 dbg_run oc get svc demo-app-lb -n ${NAMESPACE} -o jsonpath='{.spec.selector}{"\n"}'
 wait
-pe "curl -s http://${LB_IP}/"
+pe "$(curl_lb_command)"
 wait
 clear
 
