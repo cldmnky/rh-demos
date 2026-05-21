@@ -53,6 +53,21 @@ SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after the AWS LoadBalancer is ready
 
+HAS_GUM=false && command -v gum &>/dev/null && HAS_GUM=true
+HAS_BAT=false && command -v bat &>/dev/null && HAS_BAT=true
+
+if ! command -v redhatsay &>/dev/null; then
+  redhatsay() {
+    if [ "$#" -gt 0 ]; then
+      echo -e "\033[1;31m$*\033[0m"
+    else
+      echo -ne "\033[1;31m"
+      cat
+      echo -e "\033[0m"
+    fi
+  }
+fi
+
 # dbg_step / dbg_run are defined by debug.sh when --debug is given; no-ops otherwise.
 command -v dbg_step &>/dev/null || dbg_step() { :; }
 command -v dbg_run  &>/dev/null || dbg_run()  { :; }
@@ -68,11 +83,28 @@ function act() {
 }
 
 function say() {
-  echo "$1" | gum style --bold --padding="1 2" --margin="1 0" --foreground="${2:-117}" | redhatsay
+  if [ "$HAS_GUM" = true ]; then
+    echo "$1" | gum style --bold --padding="1 2" --margin="1 0" --foreground="${2:-117}" | redhatsay
+  else
+    echo "$1" | redhatsay
+  fi
 }
 
 function comment() {
-  echo "$1" | gum style --italic --foreground=245 --padding="0 2"
+  if [ "$HAS_GUM" = true ]; then
+    echo "$1" | gum style --italic --foreground=245 --padding="0 2"
+  else
+    echo -e "\033[3;90m# $1\033[0m"
+  fi
+}
+
+function show_yaml() {
+  local file="$1"
+  if [ "$HAS_BAT" = true ]; then
+    bat --style=plain --color=always --language=yaml "$file"
+  else
+    cat "$file"
+  fi
 }
 
 # set_app_version: idempotent replacement of version string in app-version.yaml
@@ -389,6 +421,31 @@ We will build everything live — from Git commits to running VMs." 196
 wait
 clear
 
+say "
+  ┌────────────────────────────────────────────────────────┐
+  │            OpenShift + GitOps VM Lifecycle             │
+  └────────────────────────────────────────────────────────┘
+                              │ (Git Push Version)
+                              ▼
+                      ┌───────────────┐
+                      │    ArgoCD     │
+                      └───────┬───────┘
+                              │ (Sync Loop)
+                              ▼
+           ┌──────────────────┴──────────────────┐
+           ▼                                     ▼
+   ┌───────────────┐                     ┌───────────────┐
+   │  demo-vm-blue │                     │ demo-vm-green │
+   │   (Running)   │                     │   (Halted)    │
+   └───────┬───────┘                     └───────────────┘
+           │ (Active Route)                      │ (In-Place Snapshot Clone)
+           ▼                                     ▼
+   ┌───────────────┐                     ┌───────────────┐
+   │AWS LoadBalancer                     │  Smoke Tested │
+   └───────────────┘                     └───────────────┘" 117
+wait
+clear
+
 ##############################################################
 # SETUP 1 — Namespace + Secrets
 ##############################################################
@@ -408,11 +465,10 @@ pe "oc create namespace ${NAMESPACE} --dry-run=client -o yaml | oc apply -f -"
 wait
 
 comment "vm-ssh-key — private key mounted into Tekton tasks for Ansible SSH access to VMs."
-pe "oc create secret generic vm-ssh-key \
+pei "oc create secret generic vm-ssh-key \
   --from-file=id_rsa=${SSH_PRIVATE_KEY} \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
-wait
 
 comment "vm-cloud-init — cloud-init userdata that injects the public SSH key into the cloud-user's authorized_keys."
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
@@ -432,15 +488,14 @@ trap 'rm -f "${cloud_init_file}"' EXIT
   printf '  expire: false\n'
 } > "${cloud_init_file}"
 comment "Here is the cloud-init we just generated:"
-pe "cat ${cloud_init_file}"
+pe "show_yaml ${cloud_init_file}"
 wait
-pe "oc create secret generic vm-cloud-init \
+pei "oc create secret generic vm-cloud-init \
   --from-file=userdata=${cloud_init_file} \
   --namespace=${NAMESPACE} \
   --dry-run=client -o yaml | oc apply -f -"
-wait
 
-pe "oc get secret vm-ssh-key vm-cloud-init -n ${NAMESPACE}"
+pei "oc get secret vm-ssh-key vm-cloud-init -n ${NAMESPACE}"
 dbg_run oc get secret vm-ssh-key vm-cloud-init -n ${NAMESPACE} -o yaml
 wait
 clear
@@ -487,31 +542,31 @@ pe "oc patch argocd openshift-gitops -n ${ARGOCD_NS} \
 wait
 
 comment "Create the AppProject — scopes this demo to our GitHub repo and the vm-demo namespace."
-pe "cat ${DEMO_DIR}/argocd/appproject.yaml"
+pe "show_yaml ${DEMO_DIR}/argocd/appproject.yaml"
 wait
-pe "oc apply -f ${DEMO_DIR}/argocd/appproject.yaml"
+pei "oc apply -f ${DEMO_DIR}/argocd/appproject.yaml"
 wait
 clear
 
 comment "Grant the ArgoCD application controller admin access in vm-demo so it can create VMs, Services, and pipelines."
-pe "cat ${DEMO_DIR}/argocd/rbac.yaml"
+pe "show_yaml ${DEMO_DIR}/argocd/rbac.yaml"
 wait
-pe "oc apply -f ${DEMO_DIR}/argocd/rbac.yaml"
+pei "oc apply -f ${DEMO_DIR}/argocd/rbac.yaml"
 wait
 clear
 
 comment "Application 1: VMs and services — ArgoCD renders a Helm chart with ROSA values."
 comment "Runtime Helm parameters override values without Git commits — used by the upgrade pipeline."
-pe "cat ${DEMO_DIR}/argocd/application-rosa.yaml"
+pe "show_yaml ${DEMO_DIR}/argocd/application-rosa.yaml"
 wait
-pe "oc apply -f ${DEMO_DIR}/argocd/application-rosa.yaml -n ${NAMESPACE}"
+pei "oc apply -f ${DEMO_DIR}/argocd/application-rosa.yaml -n ${NAMESPACE}"
 wait
 clear
 
 comment "Application 2: Pipeline infrastructure — Tekton tasks, pipelines, event-listener."
-pe "cat ${DEMO_DIR}/argocd/application-infra.yaml"
+pe "show_yaml ${DEMO_DIR}/argocd/application-infra.yaml"
 wait
-pe "oc apply -f ${DEMO_DIR}/argocd/application-infra.yaml -n ${NAMESPACE}"
+pei "oc apply -f ${DEMO_DIR}/argocd/application-infra.yaml -n ${NAMESPACE}"
 wait
 clear
 
@@ -572,15 +627,15 @@ act 1 "What's in Git drives the cluster"
 
 comment "This Helm chart is everything ArgoCD needs to create and manage both VMs."
 comment "values.yaml is the reset state. The pipeline overrides values at runtime — no Git commits."
-pe "cat ${DEMO_DIR}/chart/values.yaml"
+pe "show_yaml ${DEMO_DIR}/chart/values.yaml"
 wait
 clear
 
-pe "cat ${DEMO_DIR}/chart/templates/vm-blue.yaml"
+pe "show_yaml ${DEMO_DIR}/chart/templates/vm-blue.yaml"
 wait
 clear
 
-pe "cat ${DEMO_DIR}/chart/templates/vm-green.yaml"
+pe "show_yaml ${DEMO_DIR}/chart/templates/vm-green.yaml"
 wait
 clear
 
@@ -681,7 +736,7 @@ clear
 
 comment "Bump the app version and push — the upgrade pipeline is triggered manually below."
 pe "ruby -0pi -e 'gsub(/version: \"v[0-9.]+\"/, \"version: \\\"v2.0\\\"\")' ${DEMO_DIR}/pipelines/app-version.yaml"
-pe "cat ${DEMO_DIR}/pipelines/app-version.yaml"
+pe "show_yaml ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 pe "git -C ${REPO_ROOT} add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git -C ${REPO_ROOT} commit -m 'bump app version to v2.0'"
