@@ -51,7 +51,7 @@ commit_and_push_if_changed() {
     return 0
   fi
 
-  run git -C "${REPO_ROOT}" commit -m "${message}"
+  run git -C "${REPO_ROOT}" commit --no-gpg-sign -m "${message}"
   run git -C "${REPO_ROOT}" pull --rebase --autostash origin main
   run git -C "${REPO_ROOT}" push origin main
 }

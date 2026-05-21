@@ -90,7 +90,7 @@ function commit_and_push_if_changed() {
   if git -C "${REPO_ROOT}" diff --cached --quiet; then
     return 0
   fi
-  git -C "${REPO_ROOT}" commit -m "${message}"
+  git -C "${REPO_ROOT}" commit --no-gpg-sign -m "${message}"
   git -C "${REPO_ROOT}" pull --rebase --autostash origin main
   git -C "${REPO_ROOT}" push origin main
 }
