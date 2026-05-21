@@ -12,7 +12,7 @@ spec:
       description: "ClusterIP service FQDN for Ansible SSH access"
       default: demo-vm-blue-ssh.vm-demo.svc.cluster.local
     - name: lb-ip-url
-      description: "URL of the MetalLB LoadBalancer (http://<LB_IP>)"
+      description: "URL of the LoadBalancer service (http://<LB_ENDPOINT>)"
   workspaces:
     - name: ssh-key
       description: "SSH private key secret (key: id_rsa)"

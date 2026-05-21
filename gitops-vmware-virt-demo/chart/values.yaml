@@ -4,6 +4,9 @@
 
 blue:
   runStrategy: Always
+  diskSnapshot:
+    name: centos-stream10-8a1243274fb1
+    namespace: openshift-virtualization-os-images
 
 green:
   runStrategy: Halted
@@ -17,4 +20,11 @@ traffic:
 
 storage:
   storageClass: ocs-storagecluster-ceph-rbd-virtualization
+  accessMode: ReadWriteMany
+  volumeMode: ""
   size: 30Gi
+
+loadBalancer:
+  provider: metallb
+  metallb:
+    addressPool: metallb

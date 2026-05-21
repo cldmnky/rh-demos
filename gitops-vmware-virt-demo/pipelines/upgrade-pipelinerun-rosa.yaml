@@ -1,0 +1,21 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: upgrade-app-
+  namespace: vm-demo
+spec:
+  pipelineRef:
+    name: upgrade-app
+  params:
+    - name: lb-ip-url
+      value: http://demo-app-lb.vm-demo.svc.cluster.local
+    - name: storage-class
+      value: storage-class-iscsi
+    - name: storage-access-mode
+      value: ReadWriteMany
+    - name: storage-volume-mode
+      value: Block
+  workspaces:
+    - name: ssh-key
+      secret:
+        secretName: vm-ssh-key

@@ -14,15 +14,18 @@ spec:
       spec:
         storage:
           accessModes:
-            - ReadWriteMany
+            - {{ .Values.storage.accessMode }}
+{{- if .Values.storage.volumeMode }}
+          volumeMode: {{ .Values.storage.volumeMode }}
+{{- end }}
           resources:
             requests:
               storage: {{ .Values.storage.size }}
           storageClassName: {{ .Values.storage.storageClass }}
         source:
           snapshot:
-            name: centos-stream10-8a1243274fb1
-            namespace: openshift-virtualization-os-images
+            name: {{ .Values.blue.diskSnapshot.name }}
+            namespace: {{ .Values.blue.diskSnapshot.namespace }}
   template:
     metadata:
       labels:

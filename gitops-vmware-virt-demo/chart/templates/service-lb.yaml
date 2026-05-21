@@ -3,8 +3,10 @@ kind: Service
 metadata:
   name: demo-app-lb
   namespace: vm-demo
+{{- if eq .Values.loadBalancer.provider "metallb" }}
   annotations:
-    metallb.universe.tf/address-pool: metallb
+    metallb.universe.tf/address-pool: {{ .Values.loadBalancer.metallb.addressPool }}
+{{- end }}
 spec:
   type: LoadBalancer
   selector:

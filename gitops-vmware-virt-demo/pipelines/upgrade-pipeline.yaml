@@ -6,10 +6,19 @@ metadata:
 spec:
   params:
     - name: lb-ip-url
-      description: "URL of the MetalLB LoadBalancer (http://<LB_IP>)"
+      description: "URL of the LoadBalancer service (http://<LB_ENDPOINT>)"
     - name: run-id
       description: "Unique identifier for this upgrade run — defaults to PipelineRun name"
       default: "$(context.pipelineRun.name)"
+    - name: storage-class
+      description: "StorageClass used when recreating the green VM from the blue snapshot"
+      default: ocs-storagecluster-ceph-rbd-virtualization
+    - name: storage-access-mode
+      description: "Access mode used when recreating the green VM disk"
+      default: ReadWriteMany
+    - name: storage-volume-mode
+      description: "Optional volume mode used when recreating the green VM disk"
+      default: ""
   tasks:
     # [1] Safety net: snapshot blue before touching anything
     - name: snapshot-blue
@@ -70,6 +79,12 @@ spec:
             type: string
           - name: volume-snapshot-name
             type: string
+          - name: storage-class
+            type: string
+          - name: storage-access-mode
+            type: string
+          - name: storage-volume-mode
+            type: string
         steps:
           - name: patch-and-sync
             image: quay.io/openshift/origin-cli:latest
@@ -79,6 +94,13 @@ spec:
 
               VM_SNAPSHOT="blue-pre-upgrade-$(params.run-id)"
               SNAPSHOT="$(params.volume-snapshot-name)"
+              STORAGE_CLASS="$(params.storage-class)"
+              STORAGE_ACCESS_MODE="$(params.storage-access-mode)"
+              STORAGE_VOLUME_MODE="$(params.storage-volume-mode)"
+              STORAGE_VOLUME_MODE_YAML=""
+              if [ -n "${STORAGE_VOLUME_MODE}" ]; then
+                STORAGE_VOLUME_MODE_YAML="                        volumeMode: ${STORAGE_VOLUME_MODE}"
+              fi
 
               # Patch Application parameters FIRST (so any ArgoCD selfHeal uses the new values).
               # Full parameter set for start-green phase:
@@ -132,11 +154,12 @@ spec:
                     spec:
                       storage:
                         accessModes:
-                          - ReadWriteMany
+                          - ${STORAGE_ACCESS_MODE}
                         resources:
                           requests:
                             storage: 30Gi
-                        storageClassName: ocs-storagecluster-ceph-rbd-virtualization
+                        storageClassName: ${STORAGE_CLASS}
+              ${STORAGE_VOLUME_MODE_YAML}
                       source:
                         snapshot:
                           name: ${SNAPSHOT}
@@ -194,6 +217,12 @@ spec:
           value: $(params.run-id)
         - name: volume-snapshot-name
           value: $(tasks.snapshot-blue.results.volume-snapshot-name)
+        - name: storage-class
+          value: $(params.storage-class)
+        - name: storage-access-mode
+          value: $(params.storage-access-mode)
+        - name: storage-volume-mode
+          value: $(params.storage-volume-mode)
 
     # [3] Wait for green VMI to reach Running phase
     - name: wait-for-green

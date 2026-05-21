@@ -15,7 +15,10 @@ spec:
       spec:
         storage:
           accessModes:
-            - ReadWriteMany
+            - {{ .Values.storage.accessMode }}
+{{- if .Values.storage.volumeMode }}
+          volumeMode: {{ .Values.storage.volumeMode }}
+{{- end }}
           resources:
             requests:
               storage: {{ .Values.storage.size }}

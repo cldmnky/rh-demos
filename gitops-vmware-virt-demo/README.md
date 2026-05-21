@@ -346,6 +346,33 @@ cd gitops-vmware-virt-demo
 ./demo/demo.sh
 ```
 
+### Running on ROSA with NetApp storage
+
+The ROSA path keeps the original demo unchanged and uses ROSA-specific entrypoints:
+
+```bash
+./gitops-vmware-virt-demo/demo/demo-rosa.sh
+```
+
+ROSA-specific assumptions:
+
+| Requirement | ROSA value |
+|---|---|
+| VM storage | NetApp Trident `storage-class-iscsi` |
+| VM disk mode | `ReadWriteMany` + `Block` |
+| Boot source | Ready `centos-stream10` DataSource in `openshift-virtualization-os-images` |
+| Load balancer | AWS native Service `type: LoadBalancer` hostname/IP |
+| ArgoCD Application | `argocd/application-rosa.yaml` with `chart/values-rosa.yaml` |
+
+Before running, verify that `chart/values-rosa.yaml` matches the current boot-source snapshot:
+
+```bash
+oc get datasource centos-stream10 -n openshift-virtualization-os-images \
+  -o jsonpath='{.status.source.snapshot.namespace}/{.status.source.snapshot.name}{" ready="}{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+```
+
+If the snapshot name has changed, update `chart/values-rosa.yaml` before running the ROSA scripts.
+
 Useful flags:
 
 | Flag | Behavior |
@@ -372,6 +399,13 @@ Run the non-interactive test flow:
 ```bash
 ./gitops-vmware-virt-demo/scripts/cleanup.sh
 ./gitops-vmware-virt-demo/demo/test-flow.sh
+```
+
+For ROSA:
+
+```bash
+./gitops-vmware-virt-demo/scripts/cleanup.sh
+./gitops-vmware-virt-demo/demo/test-flow-rosa.sh
 ```
 
 The test flow verifies:
