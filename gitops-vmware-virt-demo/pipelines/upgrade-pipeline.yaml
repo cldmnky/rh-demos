@@ -99,7 +99,7 @@ spec:
               STORAGE_VOLUME_MODE="$(params.storage-volume-mode)"
               STORAGE_VOLUME_MODE_YAML=""
               if [ -n "${STORAGE_VOLUME_MODE}" ]; then
-                STORAGE_VOLUME_MODE_YAML="                        volumeMode: ${STORAGE_VOLUME_MODE}"
+                STORAGE_VOLUME_MODE_YAML="          volumeMode: ${STORAGE_VOLUME_MODE}"
               fi
 
               # Patch Application parameters FIRST (so any ArgoCD selfHeal uses the new values).
