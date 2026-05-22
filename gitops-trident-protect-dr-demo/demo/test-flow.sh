@@ -22,14 +22,14 @@ done
 
 echo "⏳ Waiting for Trident Protect Application to become Ready..."
 for i in {1..30}; do
-  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null || true)
+  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
   echo "   Current state: ${STATE}"
-  if [[ "${STATE}" == "Ready" ]]; then
+  if [[ "${STATE}" == "True" ]]; then
     break
   fi
   sleep 5
 done
-if [[ "${STATE}" != "Ready" ]]; then
+if [[ "${STATE}" != "True" ]]; then
   echo "❌ Error: Trident Protect Application did not reach Ready state." >&2
   exit 1
 fi
@@ -93,13 +93,13 @@ done
 
 echo "🔍 Verifying Pattern B Restored Application in vm-dr-backup..."
 for i in {1..30}; do
-  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app-restored -n vm-dr-backup -o jsonpath='{.status.state}' 2>/dev/null || true)
-  if [[ "${STATE}" == "Ready" ]]; then
+  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app-restored -n vm-dr-backup -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+  if [[ "${STATE}" == "True" ]]; then
     break
   fi
   sleep 5
 done
-if [[ "${STATE}" != "Ready" ]]; then
+if [[ "${STATE}" != "True" ]]; then
   echo "❌ Error: Restored Trident Application is not Ready." >&2
   exit 1
 fi
