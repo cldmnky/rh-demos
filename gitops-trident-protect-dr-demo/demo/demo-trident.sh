@@ -98,7 +98,7 @@ wait
 # ==========================================
 act "1" "Deploying Active Production VM"
 
-comment "First we grant ArgoCD controller the necessary permissions."
+comment "First we grant ArgoCD controller the necessary cluster-level permissions."
 pei "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
 wait
 
@@ -114,7 +114,9 @@ comment "Let's watch the production VM boot up inside the vm-prod namespace..."
 pe "oc get vm -n vm-prod"
 wait
 
-comment "Trident Protect is declarative. We define an 'Application' that tracks all namespace resources."
+comment "Trident Protect is declarative. We define an 'Application' resource (centos-vm-app)."
+comment "This defines the logical boundary of our app, letting Trident Protect manage all resources"
+comment "in the namespace (VM definitions, Secrets, Services, and PVCs) as a single, consistent unit."
 pe "oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o yaml"
 wait
 clear
@@ -139,11 +141,14 @@ pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-a
 pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
 wait
 
-comment "Now we trigger the DR pipeline. This will freeze guest FS, back up to S3, thaw, and restore to vm-dr-backup."
+comment "Now we trigger the DR pipeline. It uses an offsite S3-compatible target represented by an 'AppVault' CR."
+comment "Trident Protect uses ExecHooks to freeze the guest filesystems for application-consistency,"
+comment "takes a snapshot, and copies both volume blocks and Kubernetes metadata to the AWS S3 vault via Kopia."
 pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup --showlog"
 wait
 
 comment "Let's verify that the restored application and VirtualMachine are running in vm-dr-backup namespace!"
+comment "Trident Protect automatically recreated the PVCs, recovered data from S3, and redeployed the KubeVirt resources."
 pe "oc get vm -n vm-dr-backup"
 wait
 clear
@@ -158,6 +163,7 @@ pe "show_yaml ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
 wait
 
 comment "Before we establish SnapMirror replication, the source application must have at least one Completed Snapshot."
+comment "This provides a valid source recovery point for the mirror relationship to synchronize from."
 pe "cat <<EOF | oc apply -f -
 apiVersion: protect.trident.netapp.io/v1
 kind: Snapshot
@@ -175,6 +181,8 @@ pe "oc get snapshot source-vm-snap -n vm-prod"
 wait
 
 comment "Now let's establish a high-performance block-level active-passive mirror using NetApp SnapMirror."
+comment "An AppMirrorRelationship (AMR) performs asynchronous block replication directly at the ONTAP storage layer"
+comment "for maximum speed, while staging the application YAML manifests and metadata in our S3 AppVault."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
 wait
 
@@ -189,6 +197,8 @@ wait
 
 comment "In standby state, the target VM is powered down and the underlying PVC is completely Read-Only."
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the AppMirrorRelationship to 'Promoted'."
+comment "ArgoCD will sync the Promotion state, prompting Trident Protect to shift the target volume to Read-Write"
+comment "and instantly redeploy the CentOS VM definition."
 pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/source/helm/parameters/1\",\"value\":{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}}]'"
 wait
 
