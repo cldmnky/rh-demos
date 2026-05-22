@@ -52,13 +52,18 @@ spec:
               EOF
               
               echo "Waiting for Trident Protect snapshot ${VM_SNAPSHOT} to complete..."
-              oc wait --for=condition=Ready snapshot/${VM_SNAPSHOT} -n vm-prod --timeout=300s
+              until [[ "$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null)" == "Completed" ]]; do
+                echo -n '.'
+                sleep 5
+              done
+              echo ""
 
-              # Find the actual backing CSI VolumeSnapshot name created under the hood
-              VOLUME_SNAPSHOT=$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.pvcs[0]}' 2>/dev/null || true)
-              # Fallback: if empty, query the generated volumeSnapshots list directly
+              # Find the backing CSI VolumeSnapshot for the blue root disk PVC.
+              BLUE_DISK_SNAPSHOT=$(oc get volumesnapshot -n vm-prod -o jsonpath='{range .items[?(@.spec.source.persistentVolumeClaimName=="centos-vm-blue-disk")]}{.metadata.name}{end}' 2>/dev/null || true)
+              VOLUME_SNAPSHOT="${BLUE_DISK_SNAPSHOT}"
+              # Fallback: if the lookup by PVC name failed, pick the newest one from the snapshot status list
               if [ -z "${VOLUME_SNAPSHOT}" ]; then
-                VOLUME_SNAPSHOT=$(oc get volumesnapshot -n vm-prod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                VOLUME_SNAPSHOT=$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.volumeSnapshots[0].name}' 2>/dev/null || true)
               fi
               if [ -z "${VOLUME_SNAPSHOT}" ]; then
                 echo "Could not resolve backing CSI VolumeSnapshot" >&2
