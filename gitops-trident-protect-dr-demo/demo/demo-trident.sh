@@ -35,6 +35,8 @@ NAMESPACE_PROD="vm-prod"
 NAMESPACE_MIRROR="vm-dr-mirror"
 NAMESPACE_BACKUP="vm-dr-backup"
 ARGOCD_NS="openshift-gitops"
+SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
+SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 
@@ -115,6 +117,16 @@ fi
 if command -v argocd &>/dev/null; then
   argocd login --core 2>/dev/null || true
 fi
+
+# Pre-create vm-ssh-key secret with the presenter's SSH private key.
+# vm-cloud-init is created by the Helm chart from values.
+for ns in "vm-prod" "vm-dr-backup" "vm-dr-mirror"; do
+  oc create namespace "${ns}" --dry-run=client -o yaml | oc apply -f - 2>/dev/null || true
+  oc create secret generic vm-ssh-key \
+    --namespace="${ns}" \
+    --from-file=id_rsa="${SSH_PRIVATE_KEY}" \
+    --dry-run=client -o yaml | oc apply -f - 2>/dev/null || true
+done
 
 ########################
 # DEMO START

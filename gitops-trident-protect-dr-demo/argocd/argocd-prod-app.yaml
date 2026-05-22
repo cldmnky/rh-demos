@@ -28,3 +28,8 @@ spec:
       jsonPointers:
         - /spec/template/spec/architecture
         - /spec/dataVolumeTemplates/0/spec/storage/volumeMode
+    - group: ""
+      kind: Secret
+      name: vm-ssh-key
+      jsonPointers:
+        - /data

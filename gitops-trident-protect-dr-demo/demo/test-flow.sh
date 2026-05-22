@@ -6,7 +6,6 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEMO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
-SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 
 echo "🚀 Starting E2E validation for Trident Protect & VM Lifecycle DR Demo..."
 
@@ -42,25 +41,13 @@ function helm_param() {
 echo "🧹 Step 1: Performing pre-run cleanup..."
 "${DEMO_ROOT}/scripts/cleanup.sh"
 
-# Step 2: Create Secrets
-echo "🔑 Step 2: Creating SSH & cloud-init Secrets across namespaces..."
+# Step 2: Create SSH key Secrets across namespaces (cloud-init is managed by the Helm chart)
+echo "🔑 Step 2: Creating vm-ssh-key Secrets across namespaces..."
 for ns in "vm-prod" "vm-dr-backup" "vm-dr-mirror"; do
   oc create namespace "${ns}" --dry-run=client -o yaml | oc apply -f -
-  
   oc create secret generic vm-ssh-key \
     --namespace="${ns}" \
     --from-file=id_rsa="${SSH_PRIVATE_KEY}" \
-    --dry-run=client -o yaml | oc apply -f -
-
-  PUB_KEY_CONTENT=$(cat "${SSH_PUBLIC_KEY}")
-  oc create secret generic vm-cloud-init \
-    --namespace="${ns}" \
-    --from-literal=userdata="#cloud-config
-user: cloud-user
-password: redhat
-chpasswd: { expire: False }
-ssh_authorized_keys:
-  - ${PUB_KEY_CONTENT}" \
     --dry-run=client -o yaml | oc apply -f -
 done
 
