@@ -56,6 +56,27 @@ oc delete l2advertisement demo-l2 -n metallb-system --ignore-not-found 2>/dev/nu
 echo "→ Removing VirtualMachineSnapshots from ${NAMESPACE}..."
 oc delete virtualmachinesnapshot --all -n "${NAMESPACE}" --ignore-not-found
 
+# Delete VolumeSnapshots before namespace deletion. If they get stuck due to CSI finalizer issues,
+# we force-remove their finalizers to prevent namespace deletion hangs.
+echo "→ Removing VolumeSnapshots from ${NAMESPACE}..."
+oc delete volumesnapshot --all -n "${NAMESPACE}" --ignore-not-found --timeout=15s 2>/dev/null || true
+
+vss=$(oc get volumesnapshot -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+if [[ -n "${vss}" ]]; then
+  echo "   Force-removing finalizers from remaining VolumeSnapshots in ${NAMESPACE}..."
+  for vs in ${vss}; do
+    oc patch volumesnapshot "${vs}" -n "${NAMESPACE}" --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+  done
+fi
+
+vscs=$(oc get volumesnapshotcontent -o jsonpath='{range .items[?(@.spec.volumeSnapshotRef.namespace=="'"${NAMESPACE}"'")]}{.metadata.name}{" "}{end}' 2>/dev/null || true)
+if [[ -n "${vscs}" ]]; then
+  echo "   Force-removing finalizers from remaining VolumeSnapshotContents for ${NAMESPACE}..."
+  for vsc in ${vscs}; do
+    oc patch volumesnapshotcontent "${vsc}" --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+  done
+fi
+
 # Delete entire vm-demo namespace (removes VMs, DataVolumes, PVCs, pipelines, secrets, services, etc.)
 echo "→ Deleting namespace ${NAMESPACE} (VMs, DataVolumes, PVCs, pipelines, secrets, services)..."
 oc delete namespace "${NAMESPACE}" --ignore-not-found
