@@ -3,7 +3,6 @@
 secrets:
   sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA3lypjGQi2L3rT3QbnlqD/dPWQwwQosRVIdmk/pTuEs mbengtss@mbengtss1-mac"
   cloudUser: cloud-user
-  sshPrivateKey: ""  # Set at deploy time by the demo script
 
 blue:
   enabled: true
