@@ -65,6 +65,16 @@ function comment() {
   fi
 }
 
+function prompt_done() {
+  echo ""
+  if [ "$HAS_GUM" = true ]; then
+    gum style --bold --foreground=82 "✔ Done. Press any key to continue..."
+  else
+    echo -e "\033[1;32m✔ Done. Press any key to continue...\033[0m"
+  fi
+  wait
+}
+
 ########################
 # Pre-flight
 ########################
@@ -88,21 +98,21 @@ wait
 # ==========================================
 act "1" "Deploying Active Production VM"
 
-comment "Let's first create the cluster rolebindings to grant ArgoCD controller full administrative permissions."
-pe "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
-wait
+comment "First we grant ArgoCD controller the permissions it needs — this is plumbing, so we auto-execute."
+pei "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
+prompt_done
 
 comment "We deploy our production CentOS VM environment declaratively via ArgoCD."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
-wait
+prompt_done
 
 comment "Let's watch the production VM boot up inside the vm-prod namespace..."
 pe "oc get vm -n vm-prod"
-wait
+prompt_done
 
 comment "Trident Protect is declarative. We define a protect 'Application' that tracks all namespace resources."
 pe "oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o yaml"
-wait
+prompt_done
 clear
 
 # ==========================================
@@ -112,22 +122,24 @@ act "2" "Pipeline-Driven S3 Backup & Restore"
 
 comment "We have a critical CentOS VirtualMachine running. Let's create an on-demand offsite S3-backed backup."
 comment "To do this safely and application-consistently, we run an OpenShift Pipeline (Tekton)."
-pe "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-backup.yaml -n vm-prod"
-pe "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-restore.yaml -n vm-prod"
-pe "oc apply -f ${DEMO_DIR}/pipelines/dr-pipeline.yaml -n vm-prod"
-wait
+comment "Applying pipeline tasks and definitions — plumbing, auto-executed."
+pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-backup.yaml -n vm-prod"
+pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-restore.yaml -n vm-prod"
+pei "oc apply -f ${DEMO_DIR}/pipelines/dr-pipeline.yaml -n vm-prod"
+prompt_done
 
-comment "Let's trigger our Tekton Pipeline. This will freeze guest FS, create the backup to S3, thaw guest, and restore to vm-dr-backup."
-pe "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
-pe "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
-wait
+comment "Granting pipeline service accounts the RBAC they need — also plumbing, auto-executed."
+pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
+pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
+prompt_done
 
-pe "tkn pipeline start trident-dr-pipeline -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup --showlog"
-wait
+comment "Now we trigger the DR pipeline. This will freeze guest FS, back up to S3, thaw, and restore to vm-dr-backup."
+pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup --showlog"
+prompt_done
 
 comment "Let's verify that the restored application and VirtualMachine are running in vm-dr-backup namespace!"
 pe "oc get vm -n vm-dr-backup"
-wait
+prompt_done
 clear
 
 # ==========================================
@@ -137,31 +149,31 @@ act "3" "GitOps-Driven SnapMirror DR Failover"
 
 comment "Now let's establish a high-performance block-level active-passive mirror using NetApp SnapMirror."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
-wait
+prompt_done
 
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "STALE-UID")
-comment "Let's link the mirror relationship to the source Application's UID."
-pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"}]}}}}'"
-wait
+comment "Link the mirror relationship to the source Application's UID — auto-executed."
+pei "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"}]}}}}'"
+prompt_done
 
 comment "Let's observe the standby mirror relationship state."
 pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
-wait
+prompt_done
 
 comment "In standby state, the target VM is powered down and the underlying PVC is completely Read-Only."
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the AppMirrorRelationship to 'Promoted'."
 pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/source/helm/parameters/1\",\"value\":{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}}]'"
-wait
+prompt_done
 
 comment "ArgoCD will sync the Promotion state. Let's watch the AMR state transition to Promoted..."
 pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
-wait
+prompt_done
 
 comment "Once promoted, the volume becomes Read-Write and Trident Protect automatically boots up the CentOS VM!"
 pe "oc get vm -n vm-dr-mirror"
-wait
+prompt_done
 
 clear
-redhatsay "🎩 Demo Complete!
+redhatsay "Demo Complete!
 Both S3 Backup/Restore & SnapMirror DR patterns demonstrated successfully!"
 wait
