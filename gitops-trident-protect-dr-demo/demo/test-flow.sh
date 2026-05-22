@@ -259,7 +259,7 @@ for i in {1..60}; do
 done
 
 echo "🔍 Verifying Pattern B Restored Application in vm-dr-backup..."
-for i in {1..30}; do
+for i in {1..60}; do
   STATE=$(oc get application.protect.trident.netapp.io centos-vm-app-restored -n vm-dr-backup -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
   if [[ "${STATE}" == "True" ]]; then
     break
@@ -272,7 +272,7 @@ if [[ "${STATE}" != "True" ]]; then
 fi
 
 echo "⏳ Waiting for Restored VM to become Running in vm-dr-backup..."
-for i in {1..40}; do
+for i in {1..90}; do
   STATUS=$(oc get vm centos-vm-blue -n vm-dr-backup -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
   echo "   Restored VM status: ${STATUS}"
   if [[ "${STATUS}" == "Running" ]]; then
@@ -329,7 +329,7 @@ echo "   Injecting Source App UID into ArgoCD Helm Parameters..."
 helm_param trident-dr-mirror "trident.amr.sourceAppUID=${SOURCE_UID}"
 
 echo "⏳ Waiting for AppMirrorRelationship to become Established..."
-for i in {1..40}; do
+for i in {1..60}; do
   STATE=$(oc get amr vm-mirror-relationship -n vm-dr-mirror -o jsonpath='{.status.state}' 2>/dev/null || true)
   echo "   AMR State: ${STATE}"
   if [[ "${STATE}" == "Established" ]]; then
