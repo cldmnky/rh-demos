@@ -156,6 +156,15 @@ for i in {1..60}; do
 done
 
 echo "🔍 Verifying VM Green is Running and VM Blue is Halted..."
+for i in {1..20}; do
+  VM_GREEN_STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+  VM_BLUE_STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+  echo "   VM Green Status: ${VM_GREEN_STATUS}, VM Blue Status: ${VM_BLUE_STATUS}"
+  if [[ "${VM_GREEN_STATUS}" == "Running" && ("${VM_BLUE_STATUS}" == "Stopped" || "${VM_BLUE_STATUS}" == "Stopping") ]]; then
+    break
+  fi
+  sleep 3
+done
 VM_GREEN_STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
 VM_BLUE_STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
 echo "   VM Green Status: ${VM_GREEN_STATUS}, VM Blue Status: ${VM_BLUE_STATUS}"
