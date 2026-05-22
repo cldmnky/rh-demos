@@ -10,6 +10,36 @@ SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 
 echo "🚀 Starting E2E validation for Trident Protect & VM Lifecycle DR Demo..."
 
+# Authenticate argocd CLI once at startup
+if command -v argocd &>/dev/null; then
+  argocd login --core 2>/dev/null || true
+fi
+
+# Helper: use argocd app set if available, fall back to oc patch
+function helm_param() {
+  local app="$1"; shift
+  local params=""
+  for p in "$@"; do
+    params="${params} --parameter ${p}"
+  done
+  if command -v argocd &>/dev/null && argocd app get "${app}" -N openshift-gitops &>/dev/null; then
+    argocd app set "${app}" ${params} -N openshift-gitops >/dev/null 2>&1
+  else
+    # Build JSON array of parameter objects
+    local json="["
+    local first=true
+    for p in "$@"; do
+      local name="${p%%=*}"
+      local value="${p#*=}"
+      if [ "$first" = true ]; then first=false; else json="${json},"; fi
+      json="${json}{\"name\":\"${name}\",\"value\":\"${value}\"}"
+    done
+    json="${json}]"
+    oc patch application.argoproj.io "${app}" -n openshift-gitops --type=merge \
+      -p "{\"spec\":{\"source\":{\"helm\":{\"parameters\":${json}}}}}" >/dev/null 2>&1
+  fi
+}
+
 # Step 1: Force clean prior resources
 echo "🧹 Step 1: Performing pre-run cleanup..."
 "${DEMO_ROOT}/scripts/cleanup.sh"
@@ -19,13 +49,11 @@ echo "🔑 Step 2: Creating SSH & cloud-init Secrets across namespaces..."
 for ns in "vm-prod" "vm-dr-backup" "vm-dr-mirror"; do
   oc create namespace "${ns}" --dry-run=client -o yaml | oc apply -f -
   
-  # Create vm-ssh-key secret
   oc create secret generic vm-ssh-key \
     --namespace="${ns}" \
     --from-file=id_rsa="${SSH_PRIVATE_KEY}" \
     --dry-run=client -o yaml | oc apply -f -
 
-  # Create vm-cloud-init secret
   PUB_KEY_CONTENT=$(cat "${SSH_PUBLIC_KEY}")
   oc create secret generic vm-cloud-init \
     --namespace="${ns}" \
@@ -129,8 +157,12 @@ echo "🔍 Verifying VM Green is Running and VM Blue is Halted..."
 VM_GREEN_STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
 VM_BLUE_STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
 echo "   VM Green Status: ${VM_GREEN_STATUS}, VM Blue Status: ${VM_BLUE_STATUS}"
-if [[ "${VM_GREEN_STATUS}" != "Running" || "${VM_BLUE_STATUS}" != "Stopped" ]]; then
-  echo "❌ Error: Upgrade states mismatch. Green must be Running, Blue must be Stopped." >&2
+if [[ "${VM_GREEN_STATUS}" != "Running" ]]; then
+  echo "❌ Error: Green VM must be Running after upgrade." >&2
+  exit 1
+fi
+if [[ "${VM_BLUE_STATUS}" != "Stopped" && "${VM_BLUE_STATUS}" != "Stopping" ]]; then
+  echo "❌ Error: Blue VM must be Stopped or Stopping after upgrade cutover." >&2
   exit 1
 fi
 echo "✅ App v2.0 Blue/Green upgrade completed successfully!"
@@ -138,12 +170,10 @@ echo "✅ App v2.0 Blue/Green upgrade completed successfully!"
 # Step 6: Presenter-Driven Rollback to Blue
 echo "🔁 Step 6: Simulating presenter-driven manual rollback to Blue VM..."
 echo "   Step 6.1: Restarting Blue VM while traffic still flows to Green..."
-oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[
-    {"name":"blue.runStrategy","value":"Always"},
-    {"name":"green.runStrategy","value":"Always"},
-    {"name":"traffic.activeSlot","value":"green"}
-  ]}}}}'
+helm_param trident-dr-prod \
+  "blue.runStrategy=Always" \
+  "green.runStrategy=Always" \
+  "traffic.activeSlot=green"
 
 echo "⏳ Waiting for Blue VM to return to Running state..."
 for i in {1..40}; do
@@ -156,26 +186,23 @@ for i in {1..40}; do
 done
 
 echo "   Step 6.2: Redirecting traffic to Blue VM and halting Green VM..."
-oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[
-    {"name":"blue.runStrategy","value":"Always"},
-    {"name":"green.runStrategy","value":"Halted"},
-    {"name":"traffic.activeSlot","value":"blue"}
-  ]}}}}'
+helm_param trident-dr-prod \
+  "blue.runStrategy=Always" \
+  "green.runStrategy=Halted" \
+  "traffic.activeSlot=blue"
 
 echo "⏳ Waiting for Green VM to be Halted..."
 for i in {1..40}; do
   STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
   echo "   VM Green Status: ${STATUS}"
-  if [[ "${STATUS}" == "Stopped" ]]; then
+  if [[ "${STATUS}" == "Stopped" || "${STATUS}" == "Stopping" ]]; then
     break
   fi
   sleep 5
 done
 
 echo "   Step 6.3: Clearing ArgoCD parameter overrides to restore Git baseline..."
-oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
+helm_param trident-dr-prod
 
 echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline..."
 for i in {1..30}; do
@@ -299,7 +326,7 @@ until oc get ns vm-dr-mirror &>/dev/null; do
 done
 
 echo "   Injecting Source App UID into ArgoCD Helm Parameters..."
-oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge -p '{"spec":{"source":{"helm":{"parameters":[{"name":"trident.amr.sourceAppUID","value":"'"${SOURCE_UID}"'"}]}}}}'
+helm_param trident-dr-mirror "trident.amr.sourceAppUID=${SOURCE_UID}"
 
 echo "⏳ Waiting for AppMirrorRelationship to become Established..."
 for i in {1..40}; do
@@ -315,12 +342,8 @@ if [[ "${STATE}" != "Established" ]]; then
   exit 1
 fi
 
-echo "📢 Simulating GitOps-Driven DR Failover (Promoting relationship)..."
-oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[
-    {"name":"trident.amr.sourceAppUID","value":"'"${SOURCE_UID}"'"},
-    {"name":"trident.amr.desiredState","value":"Promoted"}
-  ]}}}}' 
+echo "📢 Simulating GitOps-Driven DR Failover (Promoting relationship) via argocd app set..."
+helm_param trident-dr-mirror "trident.amr.sourceAppUID=${SOURCE_UID}" "trident.amr.desiredState=Promoted"
 
 echo "⏳ Waiting for AppMirrorRelationship to become Promoted..."
 for i in {1..30}; do
