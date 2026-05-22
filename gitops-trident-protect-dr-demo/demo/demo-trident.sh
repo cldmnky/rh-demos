@@ -36,6 +36,7 @@ ARGOCD_NS="openshift-gitops"
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 
 HAS_GUM=false && command -v gum &>/dev/null && HAS_GUM=true
+HAS_BAT=false && command -v bat &>/dev/null && HAS_BAT=true
 
 if ! command -v redhatsay &>/dev/null; then
   redhatsay() {
@@ -65,14 +66,13 @@ function comment() {
   fi
 }
 
-function prompt_done() {
-  echo ""
-  if [ "$HAS_GUM" = true ]; then
-    gum style --bold --foreground=82 "✔ Done. Press any key to continue..."
+function show_yaml() {
+  local file="$1"
+  if [ "$HAS_BAT" = true ]; then
+    bat --style=plain --color=always --language=yaml "$file"
   else
-    echo -e "\033[1;32m✔ Done. Press any key to continue...\033[0m"
+    cat "$file"
   fi
-  wait
 }
 
 ########################
@@ -98,21 +98,25 @@ wait
 # ==========================================
 act "1" "Deploying Active Production VM"
 
-comment "First we grant ArgoCD controller the permissions it needs — this is plumbing, so we auto-execute."
+comment "First we grant ArgoCD controller the necessary permissions."
 pei "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
-prompt_done
+wait
+
+comment "Let's inspect our production ArgoCD Application definition."
+pe "show_yaml ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
+wait
 
 comment "We deploy our production CentOS VM environment declaratively via ArgoCD."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
-prompt_done
+wait
 
 comment "Let's watch the production VM boot up inside the vm-prod namespace..."
 pe "oc get vm -n vm-prod"
-prompt_done
+wait
 
-comment "Trident Protect is declarative. We define a protect 'Application' that tracks all namespace resources."
+comment "Trident Protect is declarative. We define an 'Application' that tracks all namespace resources."
 pe "oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o yaml"
-prompt_done
+wait
 clear
 
 # ==========================================
@@ -120,26 +124,28 @@ clear
 # ==========================================
 act "2" "Pipeline-Driven S3 Backup & Restore"
 
-comment "We have a critical CentOS VirtualMachine running. Let's create an on-demand offsite S3-backed backup."
-comment "To do this safely and application-consistently, we run an OpenShift Pipeline (Tekton)."
-comment "Applying pipeline tasks and definitions — plumbing, auto-executed."
+comment "Let's view our Tekton DR pipeline definition."
+pe "show_yaml ${DEMO_DIR}/pipelines/dr-pipeline.yaml"
+wait
+
+comment "Applying the pipeline tasks and definitions to the cluster."
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-backup.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-restore.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/dr-pipeline.yaml -n vm-prod"
-prompt_done
+wait
 
-comment "Granting pipeline service accounts the RBAC they need — also plumbing, auto-executed."
+comment "Granting the pipeline service accounts the RBAC they need."
 pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
 pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
-prompt_done
+wait
 
 comment "Now we trigger the DR pipeline. This will freeze guest FS, back up to S3, thaw, and restore to vm-dr-backup."
 pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup --showlog"
-prompt_done
+wait
 
 comment "Let's verify that the restored application and VirtualMachine are running in vm-dr-backup namespace!"
 pe "oc get vm -n vm-dr-backup"
-prompt_done
+wait
 clear
 
 # ==========================================
@@ -147,31 +153,35 @@ clear
 # ==========================================
 act "3" "GitOps-Driven SnapMirror DR Failover"
 
+comment "Let's inspect the target SnapMirror ArgoCD Application definition."
+pe "show_yaml ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
+wait
+
 comment "Now let's establish a high-performance block-level active-passive mirror using NetApp SnapMirror."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
-prompt_done
+wait
 
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "STALE-UID")
-comment "Link the mirror relationship to the source Application's UID — auto-executed."
+comment "Link the mirror relationship to the source Application's UID."
 pei "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"}]}}}}'"
-prompt_done
+wait
 
 comment "Let's observe the standby mirror relationship state."
 pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
-prompt_done
+wait
 
 comment "In standby state, the target VM is powered down and the underlying PVC is completely Read-Only."
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the AppMirrorRelationship to 'Promoted'."
 pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/source/helm/parameters/1\",\"value\":{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}}]'"
-prompt_done
+wait
 
 comment "ArgoCD will sync the Promotion state. Let's watch the AMR state transition to Promoted..."
 pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
-prompt_done
+wait
 
 comment "Once promoted, the volume becomes Read-Write and Trident Protect automatically boots up the CentOS VM!"
 pe "oc get vm -n vm-dr-mirror"
-prompt_done
+wait
 
 clear
 redhatsay "Demo Complete!
