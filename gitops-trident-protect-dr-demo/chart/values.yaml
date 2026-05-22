@@ -27,4 +27,6 @@ trident:
     sourceAppName: centos-vm-app
     sourceAppUID: "" # Filled in at runtime or via GitOps override
     sourceNamespace: vm-prod
-    recurrenceRule: "FREQ=MINUTELY;INTERVAL=5"
+    recurrenceRule: |-
+      DTSTART:20260101T000000Z
+      RRULE:FREQ=MINUTELY;INTERVAL=5

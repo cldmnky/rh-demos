@@ -20,4 +20,6 @@ trident:
     sourceAppName: centos-vm-app
     sourceAppUID: "" # Set dynamically at runtime by the GitOps/failover pipeline
     sourceNamespace: vm-prod
-    recurrenceRule: "FREQ=MINUTELY;INTERVAL=5"
+    recurrenceRule: |-
+      DTSTART:20260101T000000Z
+      RRULE:FREQ=MINUTELY;INTERVAL=5
