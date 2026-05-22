@@ -157,6 +157,23 @@ comment "Let's inspect the target SnapMirror ArgoCD Application definition."
 pe "show_yaml ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
 wait
 
+comment "Before we establish SnapMirror replication, the source application must have at least one Completed Snapshot."
+pe "cat <<EOF | oc apply -f -
+apiVersion: protect.trident.netapp.io/v1
+kind: Snapshot
+metadata:
+  name: source-vm-snap
+  namespace: vm-prod
+spec:
+  applicationRef: centos-vm-app
+  appVaultRef: lab-vault
+EOF"
+wait
+
+comment "Let's watch our source snapshot reach a Completed state."
+pe "oc get snapshot source-vm-snap -n vm-prod"
+wait
+
 comment "Now let's establish a high-performance block-level active-passive mirror using NetApp SnapMirror."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
 wait

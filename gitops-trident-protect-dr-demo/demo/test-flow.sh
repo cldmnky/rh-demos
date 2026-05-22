@@ -126,6 +126,33 @@ if [[ "${STATUS}" != "Running" ]]; then
 fi
 echo "✅ Pattern B E2E Restore Successful!"
 
+# Step 3.5: Create source snapshot to back SnapMirror relationship
+echo "📸 Step 3.5: Creating source snapshot for SnapMirror relationship..."
+cat <<EOF | oc apply -f -
+apiVersion: protect.trident.netapp.io/v1
+kind: Snapshot
+metadata:
+  name: source-vm-snap
+  namespace: vm-prod
+spec:
+  applicationRef: centos-vm-app
+  appVaultRef: lab-vault
+EOF
+
+echo "⏳ Waiting for source snapshot to reach Completed state..."
+for i in {1..30}; do
+  STATE=$(oc get snapshot source-vm-snap -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null || true)
+  echo "   Snapshot state: ${STATE}"
+  if [[ "${STATE}" == "Completed" ]]; then
+    break
+  fi
+  sleep 5
+done
+if [[ "${STATE}" != "Completed" ]]; then
+  echo "❌ Error: Source snapshot did not complete." >&2
+  exit 1
+fi
+
 # Step 4: Test Pattern A - SnapMirror AppMirrorRelationship (AMR)
 echo "🔗 Step 4: Testing Pattern A (SnapMirror AMR) via ArgoCD..."
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}')
