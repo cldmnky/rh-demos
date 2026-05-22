@@ -51,6 +51,10 @@ echo "✅ Production VM is successfully Running!"
 
 # Step 3: Test Pattern B - S3 Backup & Restore-Based DR via Tekton
 echo "🤖 Step 3: Testing Pattern B (S3 Backup & Restore) via Tekton..."
+echo "   Granting RBAC permissions to Tekton pipeline service accounts..."
+oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
+oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f - || true
+
 echo "   Applying Tekton pipeline resources..."
 oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-backup.yaml" -n vm-prod
 oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-restore.yaml" -n vm-prod

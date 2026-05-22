@@ -11,6 +11,10 @@ echo "🧹 Cleaning up Trident Protect DR Demo resources..."
 echo "→ Removing ArgoCD Applications..."
 oc delete application trident-dr-prod trident-dr-mirror -n "${ARGOCD_NS}" --ignore-not-found --timeout=30s 2>/dev/null || true
 
+# Delete cluster-level rolebindings
+echo "→ Removing cluster rolebindings..."
+oc delete clusterrolebinding pipeline-admin-vm-prod pipeline-admin-vm-dr-backup openshift-gitops-controller-admin-global --ignore-not-found 2>/dev/null || true
+
 # Force-remove finalizers from any AppMirrorRelationships, BackupRestores, Backups, Snapshots, Applications
 for ns in "${NAMESPACES[@]}"; do
   echo "→ Cleaning up Trident Protect resources in namespace ${ns}..."
