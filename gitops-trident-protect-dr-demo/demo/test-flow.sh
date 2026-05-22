@@ -13,6 +13,9 @@ echo "🧹 Step 1: Performing pre-run cleanup..."
 
 # Step 2: Deploy Production application via ArgoCD
 echo "📦 Step 2: Deploying Production Application via ArgoCD..."
+echo "   Creating global ArgoCD controller ClusterRoleBinding..."
+oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -
+
 oc apply -f "${DEMO_ROOT}/argocd/argocd-prod-app.yaml"
 
 echo "⏳ Waiting for namespace vm-prod to be created..."
