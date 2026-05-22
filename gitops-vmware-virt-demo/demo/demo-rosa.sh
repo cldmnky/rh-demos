@@ -14,6 +14,8 @@
 #   -w <secs>  Auto-advance after N seconds
 #   --debug    Trace execution to a temp log; dump log on exit
 
+set -o pipefail
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 DEMO_DIR="gitops-vmware-virt-demo"
@@ -53,8 +55,10 @@ SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 LB_IP=""  # resolved after the AWS LoadBalancer is ready
 
-HAS_GUM=false && command -v gum &>/dev/null && HAS_GUM=true
-HAS_BAT=false && command -v bat &>/dev/null && HAS_BAT=true
+HAS_GUM=false; command -v gum &>/dev/null && HAS_GUM=true
+HAS_BAT=false; command -v bat &>/dev/null && HAS_BAT=true
+HAS_PYTHON3=false; command -v python3 &>/dev/null && HAS_PYTHON3=true
+HAS_JQ=false; command -v jq &>/dev/null && HAS_JQ=true
 
 if ! command -v redhatsay &>/dev/null; then
   redhatsay() {
@@ -73,11 +77,63 @@ command -v dbg_step &>/dev/null || dbg_step() { :; }
 command -v dbg_run  &>/dev/null || dbg_run()  { :; }
 
 ########################
+# pre-flight checks, cleanup, helpers
+########################
+check_prereqs() {
+  local missing=0
+  for cmd in oc git ruby; do
+    if ! command -v "$cmd" &>/dev/null; then
+      echo "Required command not found: $cmd" >&2
+      missing=1
+    fi
+  done
+  [ "$missing" -eq 0 ] || exit 1
+}
+
+_BG_PIDS=()
+_CLEANUP_FILES=()
+_cleanup() {
+  local p f
+  for p in "${_BG_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+  for f in "${_CLEANUP_FILES[@]}"; do rm -f "$f" 2>/dev/null || true; done
+  oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" \
+    --type=merge \
+    -p '{"spec":{"source":{"helm":{"parameters":null}}}}' >/dev/null 2>&1 || true
+}
+trap '_cleanup' EXIT INT TERM
+
+_DEMO_START=$(date +%s)
+
+# verify_green_snapshot_source: assert green VM was cloned from a specific snapshot
+function verify_green_snapshot_source() {
+  local expected_snapshot="$1"
+  local vm_snapshot_content rootdisk_snapshot
+
+  vm_snapshot_content=$(oc get virtualmachinesnapshot "${expected_snapshot}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.virtualMachineSnapshotContentName}')
+  rootdisk_snapshot=$(oc get virtualmachinesnapshotcontent "${vm_snapshot_content}" -n "${NAMESPACE}" \
+    -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}')
+
+  pe "oc get virtualmachinesnapshotcontent ${vm_snapshot_content} -n ${NAMESPACE} \
+    -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}' && echo"
+
+  if ! oc get vm demo-vm-green -n "${NAMESPACE}" \
+    -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}' 2>/dev/null | grep -q "${rootdisk_snapshot}"; then
+    echo "Green VM snapshot source mismatch: expected ${NAMESPACE}/${rootdisk_snapshot}"
+    return 1
+  fi
+
+  echo "Ready: green disk source is ${NAMESPACE}/${rootdisk_snapshot}"
+}
+
+########################
 # helpers
 ########################
 function act() {
+  local elapsed=$(( $(date +%s) - _DEMO_START ))
   clear
   redhatsay "Act $1 — $2"
+  comment "Elapsed: $((elapsed / 60))m $((elapsed % 60))s"
   wait
   clear
 }
@@ -393,6 +449,7 @@ function verify_rosa_prereqs() {
 ########################
 # pre-flight: reset state that may be left over from a previous demo run (hidden from audience)
 ########################
+check_prereqs
 verify_rosa_prereqs
 # Clear any runtime Helm parameter overrides left from a previous pipeline/rollback run.
 oc patch application.argoproj.io vm-demo -n "${NAMESPACE}" --type=merge \
@@ -474,7 +531,7 @@ comment "vm-cloud-init — cloud-init userdata that injects the public SSH key i
 PUB_KEY=$(cat "${SSH_PUBLIC_KEY}")
 # Write to a temp file — pe/eval collapses multi-line --from-literal strings into invalid YAML
 cloud_init_file=$(mktemp)
-trap 'rm -f "${cloud_init_file}"' EXIT
+_CLEANUP_FILES+=("${cloud_init_file}")
 {
   printf '#cloud-config\n'
   printf 'users:\n'
@@ -600,6 +657,7 @@ clear
 
 pe "oc get vm -n ${NAMESPACE} -w &"
 WATCH_PID=$!
+_BG_PIDS+=($WATCH_PID)
 wait_for_blue_running
 kill $WATCH_PID 2>/dev/null
 pei ""
@@ -703,6 +761,7 @@ clear
 pe "$(curl_lb_command)"
 wait
 
+pei ""
 say "v1.0 is live on demo-vm-blue.
 Deployed by Ansible, orchestrated by Tekton, infrastructure managed by ArgoCD.
 No SSH sessions left open. Every step is in the Tekton audit log." 82
@@ -772,27 +831,25 @@ pe "oc get virtualmachinesnapshot ${EXPECTED_SNAPSHOT} -n ${NAMESPACE} \
   -o jsonpath='{.status.virtualMachineSnapshotContentName}' && echo"
 VM_SNAPSHOT_CONTENT=$(oc get virtualmachinesnapshot "${EXPECTED_SNAPSHOT}" -n "${NAMESPACE}" \
   -o jsonpath='{.status.virtualMachineSnapshotContentName}')
-ROOTDISK_SNAPSHOT=$(oc get virtualmachinesnapshotcontent "${VM_SNAPSHOT_CONTENT}" -n "${NAMESPACE}" \
-  -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}')
-GREEN_SOURCE_NAME=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
-  -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}')
-GREEN_SOURCE_NS=$(oc get vm demo-vm-green -n "${NAMESPACE}" \
-  -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.namespace}')
-if [[ "${GREEN_SOURCE_NAME}" != "${ROOTDISK_SNAPSHOT}" || "${GREEN_SOURCE_NS}" != "${NAMESPACE}" ]]; then
-  echo "Green VM snapshot source mismatch: expected ${NAMESPACE}/${ROOTDISK_SNAPSHOT}, got ${GREEN_SOURCE_NS}/${GREEN_SOURCE_NAME}"
-  exit 1
-fi
 pe "oc get virtualmachinesnapshotcontent ${VM_SNAPSHOT_CONTENT} -n ${NAMESPACE} \
   -o jsonpath='{.status.volumeSnapshotStatus[0].volumeSnapshotName}' && echo"
 pe "oc get vm demo-vm-green -n ${NAMESPACE} \
   -o jsonpath='{.spec.dataVolumeTemplates[0].spec.source.snapshot.namespace}/{.spec.dataVolumeTemplates[0].spec.source.snapshot.name}' && echo"
-comment "Expected rootdisk VolumeSnapshot: ${NAMESPACE}/${ROOTDISK_SNAPSHOT}"
+verify_green_snapshot_source "${EXPECTED_SNAPSHOT}" || exit 1
 wait
 clear
 
 comment "What did the pipeline change? No Git commits — it updated ArgoCD parameters directly."
-pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
-  -o jsonpath='{.spec.source.helm.parameters}' | python3 -m json.tool"
+if [ "$HAS_PYTHON3" = true ]; then
+  pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
+    -o jsonpath='{.spec.source.helm.parameters}' | python3 -m json.tool"
+elif [ "$HAS_JQ" = true ]; then
+  pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
+    -o jsonpath='{.spec.source.helm.parameters}' | jq ."
+else
+  pe "oc get application.argoproj.io vm-demo -n ${NAMESPACE} \
+    -o jsonpath='{.spec.source.helm.parameters}'"
+fi
 wait
 
 comment "Traffic has moved. Service selector updated by ArgoCD after the parameter patch."
@@ -881,7 +938,7 @@ clear
 ##############################################################
 # CLOSING
 ##############################################################
-echo "VMware / vCenter                       OpenShift + GitOps
+CLOSING_TABLE="VMware / vCenter                       OpenShift + GitOps
 ───────────────────────────────────    ──────────────────────────────────────
 VM defined in vCenter GUI              VM defined in Helm chart (versioned)
 Standby = powered-off clone            Standby = runStrategy: Halted (free)
@@ -889,8 +946,12 @@ Upgrade = wizard + manual LB           Upgrade = Git commit + Tekton pipeline
 Rollback = vCenter snapshot revert     Rollback = ArgoCD param patch (no commit)
 Audit trail = vCenter task history     Audit trail = git log + Tekton logs
 No PR review for VM changes            Full PR review + approval workflow
-NSX / F5 / vRA = extra licenses        AWS LoadBalancer + Tekton — platform-integrated" \
-  | gum style --bold --padding="1 2" --margin="1 0" --foreground="226" | redhatsay
+NSX / F5 / vRA = extra licenses        AWS LoadBalancer + Tekton — platform-integrated"
+if [ "$HAS_GUM" = true ]; then
+  echo "$CLOSING_TABLE" | gum style --bold --padding="1 2" --margin="1 0" --foreground="226" | redhatsay
+else
+  echo "$CLOSING_TABLE" | redhatsay
+fi
 wait
 
 redhatsay "Everything in Git.
