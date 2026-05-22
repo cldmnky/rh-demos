@@ -35,8 +35,6 @@ NAMESPACE_PROD="vm-prod"
 NAMESPACE_MIRROR="vm-dr-mirror"
 NAMESPACE_BACKUP="vm-dr-backup"
 ARGOCD_NS="openshift-gitops"
-SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
-SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-$HOME/.ssh/rh-demos.pub}"
 [[ ! -v TYPE_SPEED ]] && TYPE_SPEED=40
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 
@@ -139,31 +137,34 @@ wait
 # ==========================================
 # ACT 1: Kick off S3 Backup & Restore DR (Pattern B)
 # ==========================================
-act "1" "Kick off S3 Cloud Backup & Restore"
+act "1" "S3 Cloud Backup & Restore (Pattern B)"
 
-comment "First, let's create all our namespaces and deploy the production environment."
-comment "We'll fire off an offsite S3 backup pipeline right away — it will run in the background."
-pei "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
+comment "We are going to deploy our production CentOS VM environment and fire off an"
+comment "on-demand offsite S3 backup and restore pipeline. Since Kopia block transfers"
+comment "take time, this will run in the background while we explore application lifecycles."
 wait
 
-comment "Let's inspect our production ArgoCD Application."
+comment "Let's inspect our production ArgoCD Application definition."
 pe "show_yaml ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
 wait
 
-comment "Deploy the production environment (Blue VM active, Green halted) via ArgoCD."
+comment "We deploy our production CentOS VM environment declaratively via ArgoCD."
+comment "ArgoCD will ensure our namespace, VMs, services, and Trident resources conform to Git."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
 wait
 
-comment "While the VM boots, let's get our DR backup pipeline plumbing in place."
+comment "While the VM boots, let's deploy our DR backup pipeline and grant necessary SAs."
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-backup.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-restore.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/dr-pipeline.yaml -n vm-prod"
 pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
 wait
 
-comment "Now let's kick off the DR pipeline. It will backup our VM to AWS S3 and restore it to vm-dr-backup."
-comment "This is a 30GB volume copy — it will take several minutes and run entirely in the background."
-comment "Once the Tekton backup task completes, the Kopia data mover will start restoring blocks from S3."
+comment "Now we trigger the DR pipeline. Under the hood, Trident Protect will communicate with KubeVirt"
+comment "and use an ExecHook to cleanly freeze the guest filesystem. Once frozen, it takes an instant"
+comment "storage snapshot, thaws the VM guest, and streams both volume blocks and Kubernetes metadata"
+comment "securely to our AWS S3 bucket (AppVault) using the secure Kopia deduplication data mover."
+comment "Once backed up, the pipeline submits a BackupRestore in vm-dr-backup namespace."
 pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup --showlog"
 wait
 clear
@@ -173,20 +174,22 @@ clear
 # ==========================================
 act "2" "Tekton + Ansible — App v1.0 Deployment"
 
-comment "Let's check on our VMs. Blue should be Running, Green is Stopped (zero compute)."
+comment "Let's check on our production VMs. Blue is up and Running, and Green is Stopped/Halted (zero compute costs)."
 pe "oc get vm -n vm-prod"
 wait
 
-comment "Trident Protect is declarative. We defined an 'Application' tracking vm-prod as a single unit."
+comment "Trident Protect is fully declarative. We have defined an 'Application' custom resource (centos-vm-app)."
+comment "This Application CR groups all namespace resources (VMs, DataVolumes, ConfigMaps, Secrets, Services)"
+comment "into a single logical application unit for unified, transactionally-safe protection."
 pe "oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o yaml"
 wait
 
-comment "Now let's configure our guest VM. Instead of a manual SSH session, we run a Tekton pipeline."
-comment "It will wait for the VM, then run an Ansible playbook to install httpd and deploy v1.0."
+comment "Instead of manually SSHing in and running ad-hoc shell commands, guest VM configuration"
+comment "should be managed as code. We run an automated Tekton Pipeline which invokes an Ansible playbook."
 pe "show_yaml ${DEMO_DIR}/pipelines/install-pipeline.yaml"
 wait
 
-comment "Applying the pipeline plumbing and granting RBAC."
+comment "Applying the pipeline tasks, definitions, and RBAC to the cluster."
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/ansible-run-playbook.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/smoke-test.yaml -n vm-prod"
 pei "oc apply -f ${DEMO_DIR}/pipelines/install-pipeline.yaml -n vm-prod"
@@ -199,24 +202,25 @@ wait
 clear
 
 # ==========================================
-# ACT 3: Blue/Green Upgrade using Trident Snapshots
+# ACT 3: Blue/Green VM Upgrade using Trident Snapshots
 # ==========================================
 act "3" "Blue/Green Application Upgrade"
 
-comment "Time to deploy v2.0. We push one Git commit, and Tekton orchestrates a zero-downtime upgrade."
-comment "The pipeline will: Trident Snapshot Blue -> start Green from that snapshot -> upgrade Green to v2.0 -> smoke test -> cut traffic."
-comment "First, we bump the app version in Git."
+comment "Time to deploy v2.0. We will edit Git, and Tekton will orchestrate a zero-downtime Blue/Green upgrade."
+comment "First, we bump the target app version in our Git repository."
 pe "ruby -0pi -e 'gsub(/version: \"v[0-9.]+\"/, \"version: \\\"v2.0\\\"\")' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "show_yaml ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 
-comment "Commit and push the version bump."
+comment "Let's commit and push the version bump to Git."
 pe "git add ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "git commit --no-gpg-sign -m 'bump app version to v2.0'"
 pe "git push origin main"
 wait
 
-comment "Let's inspect the Trident-powered upgrade pipeline."
+comment "Let's inspect our Tekton Upgrade Pipeline."
+comment "It will: take a Trident Snapshot of blue -> resolve the CSI VolumeSnapshot -> patch ArgoCD parameters"
+comment "to boot green from that snapshot -> run Ansible upgrade to v2.0 on green -> smoke test green -> cut traffic."
 pe "show_yaml ${DEMO_DIR}/pipelines/upgrade-pipeline.yaml"
 wait
 
@@ -224,41 +228,36 @@ comment "Applying and running the upgrade pipeline."
 pei "oc apply -f ${DEMO_DIR}/pipelines/upgrade-pipeline.yaml -n vm-prod"
 wait
 
-comment "Running the upgrade. Green is cloned from the live Blue storage snapshot — instant clone via ONTAP!"
+comment "Triggering the upgrade. The green VM's disk is cloned from the live Blue storage snapshot."
+comment "This uses NetApp's native space-efficient storage cloning — instant and consuming zero extra blocks."
 pe "tkn pipeline start upgrade-app -n vm-prod --showlog"
 wait
 
-comment "Let's check our VMs. Green is Running (v2.0), Blue is Stopped. Traffic has cut over."
+comment "Let's check our VMs. Traffic has cut over: Green is Running (v2.0) and Blue is Stopped."
 pe "oc get vm -n vm-prod"
 wait
 clear
 
 # ==========================================
-# ACT 4: Presenter-Driven Rollback
+# ACT 4: Presenter-Driven Declarative Rollback
 # ==========================================
 act "4" "GitOps Declarative Rollback"
 
 comment "If anything goes wrong, rolling back is declarative. No Git commits needed."
-comment "We use argocd app set to change Helm parameters — ArgoCD reconciles the state."
-comment "Step 1: Restart Blue while traffic still flows to Green."
-helm_param trident-dr-prod \
-  "blue.runStrategy=Always" \
-  "green.runStrategy=Always" \
-  "traffic.activeSlot=green"
+comment "We use the 'argocd app set' command to update Helm parameters directly, and ArgoCD reconciles."
+comment "Step 1: Spin up our Blue VM in the background (zero-downtime, traffic still on Green)."
+pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} -p blue.runStrategy=Always -p green.runStrategy=Always -p traffic.activeSlot=green"
 wait
 
 comment "Step 2: Shifting traffic back to Blue, and halting Green."
-helm_param trident-dr-prod \
-  "blue.runStrategy=Always" \
-  "green.runStrategy=Halted" \
-  "traffic.activeSlot=blue"
+pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} -p blue.runStrategy=Always -p green.runStrategy=Halted -p traffic.activeSlot=blue"
 wait
 
-comment "Step 3: Clear all parameter overrides. ArgoCD restores the Git baseline."
-helm_param trident-dr-prod
+comment "Step 3: Clear all parameter overrides and let our authoritative Git baseline take back over."
+pe "argocd app set trident-dr-prod -N ${ARGOCD_NS}"
 wait
 
-comment "Our VMs are back to the Git baseline: Blue Running (v1.0), Green Stopped."
+comment "Our VMs are returned perfectly to our Git baseline: Blue Running (v1.0), Green Stopped."
 pe "oc get vm -n vm-prod"
 wait
 clear
@@ -266,10 +265,10 @@ clear
 # ==========================================
 # ACT 5: SnapMirror Replication DR (Pattern A)
 # ==========================================
-act "5" "GitOps-Driven SnapMirror DR Failover"
+act "5" "SnapMirror Replication DR (Pattern A)"
 
-comment "Now let's explore Pattern A: high-performance block replication via NetApp SnapMirror."
-comment "First, we take a source Snapshot to seed the mirror relationship."
+comment "Now let's explore Pattern A: high-performance asynchronous replication via NetApp SnapMirror."
+comment "First, we create a Snapshot on the production side to seed the mirror relationship."
 pe "cat <<EOF | oc apply -f -
 apiVersion: protect.trident.netapp.io/v1
 kind: Snapshot
@@ -287,19 +286,14 @@ pe "oc get snapshot source-vm-snap -n vm-prod"
 wait
 
 comment "Now let's establish a high-performance block-level active-passive mirror using NetApp SnapMirror."
-comment "An AppMirrorRelationship performs asynchronous block replication at the ONTAP storage layer,"
-comment "while staging the Kubernetes metadata in our S3 AppVault."
+comment "An AppMirrorRelationship (AMR) orchestrates block-level volume replication directly on the ONTAP layer,"
+comment "while copying the Kubernetes resources (VM definitions, Services) out of band to S3."
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-dr-mirror-app.yaml"
 wait
 
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "STALE-UID")
 comment "Link the mirror relationship to the source Application's UID."
-if command -v argocd &>/dev/null; then
-  argocd app set trident-dr-mirror -N "${ARGOCD_NS}" -p "trident.amr.sourceAppUID=${SOURCE_UID}" >/dev/null 2>&1 || true
-else
-  oc patch application.argoproj.io trident-dr-mirror -n "${ARGOCD_NS}" --type=merge \
-    -p "{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"}]}}}}"
-fi
+pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=${SOURCE_UID}"
 wait
 
 comment "Let's observe the standby mirror relationship state."
@@ -308,19 +302,16 @@ wait
 
 comment "In standby state, the target VM is powered down and the PVC is Read-Only."
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the relationship to 'Promoted'."
-if command -v argocd &>/dev/null; then
-  argocd app set trident-dr-mirror -N "${ARGOCD_NS}" -p "trident.amr.sourceAppUID=${SOURCE_UID}" -p "trident.amr.desiredState=Promoted" >/dev/null 2>&1 || true
-else
-  oc patch application.argoproj.io trident-dr-mirror -n "${ARGOCD_NS}" --type=merge \
-    -p "{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"},{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}]}}}}"
-fi
+comment "ArgoCD syncs the Promotion. Trident Protect instantly promotes the storage to Read-Write,"
+comment "reconstructs the KubeVirt virtual machine manifests, and boots the VM."
+pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=${SOURCE_UID} -p trident.amr.desiredState=Promoted"
 wait
 
 comment "ArgoCD syncs the Promotion state. Let's watch the AMR state transition to Promoted..."
 pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
 wait
 
-comment "Once promoted, the volume becomes Read-Write and Trident Protect boots up the CentOS VM!"
+comment "Once promoted, the volume becomes Read-Write and Trident Protect automatically boots up the CentOS VM!"
 pe "oc get vm -n vm-dr-mirror"
 wait
 clear
