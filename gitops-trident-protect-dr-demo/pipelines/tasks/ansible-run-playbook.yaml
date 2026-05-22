@@ -1,0 +1,55 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ansible-run-playbook
+  namespace: vm-prod
+spec:
+  params:
+    - name: ssh-host
+      description: "SSH hostname or ClusterIP service FQDN for the target VM"
+    - name: playbook-content
+      description: "Ansible playbook YAML content (passed as a string)"
+    - name: ssh-user
+      description: "SSH user on the VM"
+      default: cloud-user
+  workspaces:
+    - name: ssh-key
+      description: "Secret volume containing the SSH private key at id_rsa"
+  steps:
+    - name: wait-for-ssh
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        #!/bin/bash
+        echo "Waiting for SSH on $(params.ssh-host):22..."
+        until timeout 5 bash -c "cat < /dev/null > /dev/tcp/$(params.ssh-host)/22" 2>/dev/null; do
+          echo "  not ready, retrying in 5s..."
+          sleep 5
+        done
+        echo "SSH is reachable."
+    - name: run-ansible
+      image: quay.io/ansible/awx-ee:latest
+      env:
+        - name: PLAYBOOK_CONTENT
+          value: $(params.playbook-content)
+        - name: HOME
+          value: /tmp
+      script: |
+        #!/bin/bash
+        set -eu
+
+        if ! getent passwd "$(id -u)" &>/dev/null; then
+          echo "ansible:x:$(id -u):0:Ansible:/tmp:/bin/bash" >> /etc/passwd
+        fi
+
+        PRIVATE_KEY="/tmp/id_rsa"
+        cp "$(workspaces.ssh-key.path)/id_rsa" "$PRIVATE_KEY"
+        chmod 0600 "$PRIVATE_KEY"
+
+        printf '%s\n' "$PLAYBOOK_CONTENT" > /tmp/playbook.yaml
+
+        {
+          echo "[demo_vm]"
+          echo "$(params.ssh-host) ansible_user=$(params.ssh-user) ansible_ssh_private_key_file=$PRIVATE_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'"
+        } > /tmp/inventory.ini
+
+        ansible-playbook -i /tmp/inventory.ini /tmp/playbook.yaml

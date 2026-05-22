@@ -1,7 +1,14 @@
 # Production environment values (vm-prod)
-vm:
+blue:
   enabled: true
   runStrategy: Always
+
+green:
+  enabled: true
+  runStrategy: Halted
+
+traffic:
+  activeSlot: blue
 
 storage:
   storageClass: storage-class-iscsi

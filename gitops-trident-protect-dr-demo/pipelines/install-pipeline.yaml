@@ -1,0 +1,82 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: install-app
+  namespace: vm-prod
+spec:
+  workspaces:
+    - name: ssh-key
+      description: "SSH private key secret"
+  tasks:
+    - name: wait-for-vmi-status
+      taskRef:
+        resolver: hub
+        params:
+          - name: catalog
+            value: kubevirt-tekton-tasks
+          - name: type
+            value: artifact
+          - name: kind
+            value: task
+          - name: name
+            value: wait-for-vmi-status
+          - name: version
+            value: v0.25.0
+      params:
+        - name: vmiName
+          value: centos-vm-blue
+        - name: vmiNamespace
+          value: vm-prod
+        - name: successCondition
+          value: status.phase == Running
+        - name: failureCondition
+          value: status.phase in (Failed, Unknown)
+
+    - name: ansible-install
+      runAfter:
+        - wait-for-vmi-status
+      taskRef:
+        kind: Task
+        name: ansible-run-playbook
+      params:
+        - name: ssh-host
+          value: centos-vm-blue-ssh.vm-prod.svc.cluster.local
+        - name: playbook-content
+          value: |
+            ---
+            - hosts: demo_vm
+              become: true
+              tasks:
+                - name: Install httpd
+                  ansible.builtin.dnf:
+                    name: httpd
+                    state: present
+
+                - name: Deploy application v1.0
+                  ansible.builtin.copy:
+                    dest: /var/www/html/index.html
+                    content: "<h1>Demo App v1.0 — served by {{ inventory_hostname }}</h1>"
+
+                - name: Create health endpoint
+                  ansible.builtin.copy:
+                    dest: /var/www/html/health
+                    content: "ok"
+
+                - name: Start and enable httpd
+                  ansible.builtin.service:
+                    name: httpd
+                    state: started
+                    enabled: true
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key
+
+    - name: smoke-test
+      runAfter:
+        - ansible-install
+      taskRef:
+        kind: Task
+        name: smoke-test
+      params:
+        - name: url
+          value: http://centos-vm-blue-ssh.vm-prod.svc.cluster.local/health

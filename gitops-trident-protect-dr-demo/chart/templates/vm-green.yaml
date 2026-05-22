@@ -1,0 +1,62 @@
+{{- if .Values.green.enabled }}
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: {{ .Values.green.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.green.app }}
+    slot: green
+spec:
+  runStrategy: {{ .Values.green.runStrategy }}
+  dataVolumeTemplates:
+    - metadata:
+        name: {{ .Values.green.name }}-disk
+      spec:
+        storage:
+          accessModes:
+            - {{ .Values.storage.accessMode }}
+          volumeMode: {{ .Values.storage.volumeMode }}
+          resources:
+            requests:
+              storage: {{ .Values.storage.size }}
+          storageClassName: {{ .Values.storage.storageClass }}
+        source:
+          snapshot:
+            name: {{ .Values.green.sourceSnapshot }}
+            namespace: {{ .Values.green.sourceSnapshotNamespace }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.green.app }}
+        kubevirt.io/domain: {{ .Values.green.name }}
+    spec:
+      domain:
+        resources:
+          requests:
+            memory: 2Gi
+        cpu:
+          cores: 2
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: {{ .Values.green.name }}-disk
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: vm-cloud-init
+{{- end }}

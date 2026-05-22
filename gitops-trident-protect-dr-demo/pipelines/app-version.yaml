@@ -1,0 +1,2 @@
+# Tracks the current target application version in the demo pipelines
+version: "v1.0"

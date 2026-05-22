@@ -1,14 +1,23 @@
 # Default values for trident-dr-demo
 
-vm:
+blue:
   enabled: true
-  name: centos-vm
+  name: centos-vm-blue
   app: centos-vm-app
   runStrategy: Always
-  memory: 2Gi
-  cores: 2
   sourceSnapshot: centos-stream10-bc3fd60ed98e
   sourceSnapshotNamespace: openshift-virtualization-os-images
+
+green:
+  enabled: true
+  name: centos-vm-green
+  app: centos-vm-app
+  runStrategy: Halted
+  sourceSnapshot: centos-stream10-bc3fd60ed98e
+  sourceSnapshotNamespace: openshift-virtualization-os-images
+
+traffic:
+  activeSlot: blue
 
 storage:
   storageClass: storage-class-iscsi
@@ -25,7 +34,7 @@ trident:
     sourceAppVault: lab-vault
     destinationAppVault: lab-vault
     sourceAppName: centos-vm-app
-    sourceAppUID: "" # Filled in at runtime or via GitOps override
+    sourceAppUID: "" # Set at runtime
     sourceNamespace: vm-prod
     recurrenceRule: |-
       DTSTART:20260101T000000Z

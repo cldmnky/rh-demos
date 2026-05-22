@@ -1,16 +1,17 @@
-{{- if .Values.vm.enabled }}
+{{- if .Values.blue.enabled }}
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: {{ .Values.vm.name }}
+  name: {{ .Values.blue.name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    app: {{ .Values.vm.app }}
+    app: {{ .Values.blue.app }}
+    slot: blue
 spec:
-  runStrategy: {{ .Values.vm.runStrategy }}
+  runStrategy: {{ .Values.blue.runStrategy }}
   dataVolumeTemplates:
     - metadata:
-        name: {{ .Values.vm.name }}-disk
+        name: {{ .Values.blue.name }}-disk
       spec:
         storage:
           accessModes:
@@ -22,23 +23,26 @@ spec:
           storageClassName: {{ .Values.storage.storageClass }}
         source:
           snapshot:
-            name: {{ .Values.vm.sourceSnapshot }}
-            namespace: {{ .Values.vm.sourceSnapshotNamespace }}
+            name: {{ .Values.blue.sourceSnapshot }}
+            namespace: {{ .Values.blue.sourceSnapshotNamespace }}
   template:
     metadata:
       labels:
-        app: {{ .Values.vm.app }}
-        kubevirt.io/domain: {{ .Values.vm.name }}
+        app: {{ .Values.blue.app }}
+        kubevirt.io/domain: {{ .Values.blue.name }}
     spec:
       domain:
         resources:
           requests:
-            memory: {{ .Values.vm.memory }}
+            memory: 2Gi
         cpu:
-          cores: {{ .Values.vm.cores }}
+          cores: 2
         devices:
           disks:
             - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
               disk:
                 bus: virtio
           interfaces:
@@ -50,5 +54,9 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: {{ .Values.vm.name }}-disk
+            name: {{ .Values.blue.name }}-disk
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: vm-cloud-init
 {{- end }}

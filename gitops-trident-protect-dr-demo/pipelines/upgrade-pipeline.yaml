@@ -1,0 +1,228 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: upgrade-app
+  namespace: vm-prod
+spec:
+  params:
+    - name: run-id
+      description: "Unique identifier for this upgrade run"
+      default: "$(context.pipelineRun.name)"
+    - name: storage-class
+      description: "StorageClass used when recreating the green VM disk"
+      default: storage-class-iscsi
+    - name: storage-access-mode
+      description: "Access mode used when recreating the green VM disk"
+      default: ReadWriteMany
+    - name: storage-volume-mode
+      description: "Optional volume mode used when recreating the green VM disk"
+      default: Block
+  workspaces:
+    - name: ssh-key
+      description: "SSH private key secret"
+  tasks:
+    # [1] Safety net: snapshot blue via Trident Protect before touching anything
+    - name: snapshot-blue
+      taskSpec:
+        params:
+          - name: run-id
+            type: string
+        results:
+          - name: volume-snapshot-name
+            description: CSI VolumeSnapshot name for blue VM rootdisk
+        steps:
+          - name: snapshot
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+              VM_SNAPSHOT="blue-pre-upgrade-$(params.run-id)"
+              
+              # Declarative Trident Protect Snapshot
+              cat <<EOF | oc apply -f -
+              apiVersion: protect.trident.netapp.io/v1
+              kind: Snapshot
+              metadata:
+                name: ${VM_SNAPSHOT}
+                namespace: vm-prod
+              spec:
+                applicationRef: centos-vm-app
+                appVaultRef: lab-vault
+                reclaimPolicy: Delete
+              EOF
+              
+              echo "Waiting for Trident Protect snapshot ${VM_SNAPSHOT} to complete..."
+              oc wait --for=condition=Ready snapshot/${VM_SNAPSHOT} -n vm-prod --timeout=300s
+
+              # Find the actual backing CSI VolumeSnapshot name created under the hood
+              VOLUME_SNAPSHOT=$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.pvcs[0]}' 2>/dev/null || true)
+              # Fallback: if empty, query the generated volumeSnapshots list directly
+              if [ -z "${VOLUME_SNAPSHOT}" ]; then
+                VOLUME_SNAPSHOT=$(oc get volumesnapshot -n vm-prod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+              fi
+              if [ -z "${VOLUME_SNAPSHOT}" ]; then
+                echo "Could not resolve backing CSI VolumeSnapshot" >&2
+                exit 1
+              fi
+
+              printf '%s' "${VOLUME_SNAPSHOT}" > "$(results.volume-snapshot-name.path)"
+              echo "Backing VolumeSnapshot: ${VOLUME_SNAPSHOT}"
+      params:
+        - name: run-id
+          value: $(params.run-id)
+
+    # [2] Patch ArgoCD parameters to start green from the blue snapshot.
+    # Deletes any existing green VM first so the new clone source takes effect.
+    - name: patch-start-green
+      runAfter:
+        - snapshot-blue
+      taskSpec:
+        params:
+          - name: volume-snapshot-name
+            type: string
+          - name: storage-class
+            type: string
+          - name: storage-access-mode
+            type: string
+          - name: storage-volume-mode
+            type: string
+        steps:
+          - name: patch-and-sync
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+
+              SNAPSHOT="$(params.volume-snapshot-name)"
+              STORAGE_CLASS="$(params.storage-class)"
+              STORAGE_ACCESS_MODE="$(params.storage-access-mode)"
+              STORAGE_VOLUME_MODE="$(params.storage-volume-mode)"
+
+              # Patch Application parameters first so any sync matches this configuration.
+              #   blue  = Always (keep blue serving traffic while green prepares)
+              #   green = Always (start green)
+              #   green disk = blue rootdisk VolumeSnapshot from the snapshot
+              #   traffic = blue (not cut over yet)
+              oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
+                --patch "{
+                  \"spec\":{\"source\":{\"helm\":{\"parameters\":[
+                    {\"name\":\"blue.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.enabled\",\"value\":\"true\"},
+                    {\"name\":\"green.sourceSnapshot\",\"value\":\"${SNAPSHOT}\"},
+                    {\"name\":\"green.sourceSnapshotNamespace\",\"value\":\"vm-prod\"},
+                    {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
+                  ]}}}}"
+
+              # Recreate green VM/PVC resources to ensure boot source from snapshot takes effect
+              oc delete vm centos-vm-green -n vm-prod --ignore-not-found --wait=false
+              oc delete datavolume centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
+              oc delete pvc centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
+
+              echo "Waiting for green VM to be deleted..."
+              sleep 5
+      params:
+        - name: volume-snapshot-name
+          value: $(tasks.snapshot-blue.results.volume-snapshot-name)
+        - name: storage-class
+          value: $(params.storage-class)
+        - name: storage-access-mode
+          value: $(params.storage-access-mode)
+        - name: storage-volume-mode
+          value: $(params.storage-volume-mode)
+
+    # [3] Wait for green VMI to reach Running phase
+    - name: wait-for-green
+      runAfter:
+        - patch-start-green
+      taskRef:
+        resolver: hub
+        params:
+          - name: catalog
+            value: kubevirt-tekton-tasks
+          - name: type
+            value: artifact
+          - name: kind
+            value: task
+          - name: name
+            value: wait-for-vmi-status
+          - name: version
+            value: v0.25.0
+      params:
+        - name: vmiName
+          value: centos-vm-green
+        - name: vmiNamespace
+          value: vm-prod
+        - name: successCondition
+          value: status.phase == Running
+        - name: failureCondition
+          value: status.phase in (Failed, Unknown)
+
+    # [4] Ansible: deploy v2.0 onto green
+    - name: ansible-upgrade
+      runAfter:
+        - wait-for-green
+      taskRef:
+        kind: Task
+        name: ansible-run-playbook
+      params:
+        - name: ssh-host
+          value: centos-vm-green-ssh.vm-prod.svc.cluster.local
+        - name: playbook-content
+          value: |
+            ---
+            - hosts: demo_vm
+              become: true
+              tasks:
+                - name: Install httpd
+                  ansible.builtin.dnf:
+                    name: httpd
+                    state: present
+
+                - name: Deploy application v2.0
+                  ansible.builtin.copy:
+                    dest: /var/www/html/index.html
+                    content: "<h1>Demo App v2.0 — served by {{ inventory_hostname }}</h1>"
+
+                - name: Create health endpoint
+                  ansible.builtin.copy:
+                    dest: /var/www/html/health
+                    content: "ok"
+
+                - name: Start and enable httpd
+                  ansible.builtin.service:
+                    name: httpd
+                    state: started
+                    enabled: true
+      workspaces:
+        - name: ssh-key
+          workspace: ssh-key
+
+    # [5] Smoke test green directly before moving traffic
+    - name: smoke-test
+      runAfter:
+        - ansible-upgrade
+      taskRef:
+        kind: Task
+        name: smoke-test
+      params:
+        - name: url
+          value: http://centos-vm-green-http.vm-prod.svc.cluster.local/health
+
+    # [6] Cutover: traffic → green, blue → Halted.
+    - name: patch-cutover
+      runAfter:
+        - smoke-test
+      taskSpec:
+        steps:
+          - name: cutover
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -eu
+              oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
+                --patch "{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
+                  {\"name\":\"blue.runStrategy\",\"value\":\"Halted\"},
+                  {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+                  {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
+                ]}}}}"

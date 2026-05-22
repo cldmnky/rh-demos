@@ -1,6 +1,9 @@
 # DR Mirror environment values (vm-dr-mirror)
 # In Pattern A, the standby target does not deploy the VM locally (Trident Protect recreates it upon promotion).
-vm:
+blue:
+  enabled: false
+
+green:
   enabled: false
 
 storage:

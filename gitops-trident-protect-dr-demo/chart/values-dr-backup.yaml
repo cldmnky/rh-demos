@@ -1,6 +1,9 @@
 # DR Backup/Restore environment values (vm-dr-backup)
 # Similar to Pattern A, the standby target does not deploy the VM locally (Trident Protect's BackupRestore recreates it upon execution).
-vm:
+blue:
+  enabled: false
+
+green:
   enabled: false
 
 storage:

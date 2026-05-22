@@ -1,0 +1,12 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: upgrade-app-run-
+  namespace: vm-prod
+spec:
+  pipelineRef:
+    name: upgrade-app
+  workspaces:
+    - name: ssh-key
+      secret:
+        secretName: vm-ssh-key

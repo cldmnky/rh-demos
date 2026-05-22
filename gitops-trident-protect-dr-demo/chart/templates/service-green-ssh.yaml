@@ -1,15 +1,14 @@
-{{- if .Values.vm.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.vm.name }}-ssh
+  name: centos-vm-green-ssh
   namespace: {{ .Release.Namespace }}
 spec:
   ports:
     - name: ssh
       port: 22
       targetPort: 22
+      protocol: TCP
   selector:
-    app: {{ .Values.vm.app }}
+    kubevirt.io/domain: {{ .Values.green.name }}
   type: ClusterIP
-{{- end }}
