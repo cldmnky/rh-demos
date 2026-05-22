@@ -261,7 +261,7 @@ pe "oc get amr vm-mirror-relationship -n vm-dr-mirror"
 wait
 
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the AppMirrorRelationship to 'Promoted'."
-pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/source/helm/parameters/1\",\"value\":{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}}]'"
+pe "oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge -p '{\"spec\":{\"source\":{\"helm\":{\"parameters\":[{\"name\":\"trident.amr.sourceAppUID\",\"value\":\"${SOURCE_UID}\"},{\"name\":\"trident.amr.desiredState\",\"value\":\"Promoted\"}]}}}}'" 
 wait
 
 comment "ArgoCD will sync the Promotion state. Let's watch the AMR state transition to Promoted..."

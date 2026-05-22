@@ -52,7 +52,17 @@ spec:
               EOF
               
               echo "Waiting for Trident Protect snapshot ${VM_SNAPSHOT} to complete..."
-              until [[ "$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null)" == "Completed" ]]; do
+              DEADLINE=$(( $(date +%s) + 300 ))
+              while true; do
+                STATE=$(oc get snapshot "${VM_SNAPSHOT}" -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null || true)
+                if [[ "${STATE}" == "Completed" ]]; then
+                  break
+                fi
+                if [[ "${STATE}" == "Failed" ]]; then
+                  echo "Snapshot ${VM_SNAPSHOT} failed!" >&2
+                  exit 1
+                fi
+                [[ "$(date +%s)" -gt "${DEADLINE}" ]] && { echo "Timeout waiting for snapshot ${VM_SNAPSHOT}" >&2; exit 1; }
                 echo -n '.'
                 sleep 5
               done
@@ -124,8 +134,17 @@ spec:
               oc delete datavolume centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
               oc delete pvc centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
 
-              echo "Waiting for green VM to be deleted..."
-              sleep 5
+              echo "Waiting for green VM to be fully deleted..."
+              DEADLINE=$(( $(date +%s) + 120 ))
+              until ! oc get vm centos-vm-green -n vm-prod >/dev/null 2>&1 && \
+                    ! oc get datavolume centos-vm-green-disk -n vm-prod >/dev/null 2>&1 && \
+                    ! oc get pvc centos-vm-green-disk -n vm-prod >/dev/null 2>&1; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green deletion" >&2; exit 1; }
+                echo -n '.'
+                sleep 3
+              done
+              echo ""
+              echo "Green VM and DataVolume fully deleted — ArgoCD will now recreate from snapshot"
       params:
         - name: volume-snapshot-name
           value: $(tasks.snapshot-blue.results.volume-snapshot-name)

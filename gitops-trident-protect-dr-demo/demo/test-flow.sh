@@ -144,7 +144,6 @@ oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merg
     {"name":"green.runStrategy","value":"Always"},
     {"name":"traffic.activeSlot","value":"green"}
   ]}}}}'
-oc patch vm centos-vm-blue -n vm-prod --type=merge -p '{"spec":{"runStrategy":"Always"}}'
 
 echo "⏳ Waiting for Blue VM to return to Running state..."
 for i in {1..40}; do
@@ -163,8 +162,6 @@ oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merg
     {"name":"green.runStrategy","value":"Halted"},
     {"name":"traffic.activeSlot","value":"blue"}
   ]}}}}'
-oc patch service centos-vm-lb -n vm-prod --type=merge -p '{"spec":{"selector":{"kubevirt.io/domain":"centos-vm-blue"}}}'
-oc patch vm centos-vm-green -n vm-prod --type=merge -p '{"spec":{"runStrategy":"Halted"}}'
 
 echo "⏳ Waiting for Green VM to be Halted..."
 for i in {1..40}; do
@@ -179,6 +176,17 @@ done
 echo "   Step 6.3: Clearing ArgoCD parameter overrides to restore Git baseline..."
 oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
   -p '{"spec":{"source":{"helm":{"parameters":null}}}}'
+
+echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline..."
+for i in {1..30}; do
+  BLUE_STRAT=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
+  GREEN_STRAT=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
+  echo "   Blue: ${BLUE_STRAT}, Green: ${GREEN_STRAT}"
+  if [[ "${BLUE_STRAT}" == "Always" && "${GREEN_STRAT}" == "Halted" ]]; then
+    break
+  fi
+  sleep 5
+done
 echo "✅ Manual rollback to Blue VM completed successfully!"
 
 # Step 7: S3 Cloud Backup & Restore DR (Pattern B)
@@ -188,7 +196,7 @@ oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-restore.yaml" -n vm-pr
 oc apply -f "${DEMO_ROOT}/pipelines/dr-pipeline.yaml" -n vm-prod
 oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f - || true
 
-DR_PR=$(oc create -f "${DEMO_ROOT}/pipelines/dr-pipelinerun.yaml" 2>/dev/null || cat <<EOF | oc create -f - -o name
+DR_PR=$(cat <<EOF | oc create -f - -o name
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -308,7 +316,11 @@ if [[ "${STATE}" != "Established" ]]; then
 fi
 
 echo "📢 Simulating GitOps-Driven DR Failover (Promoting relationship)..."
-oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json -p '[{"op":"add","path":"/spec/source/helm/parameters/1","value":{"name":"trident.amr.desiredState","value":"Promoted"}}]'
+oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge \
+  -p '{"spec":{"source":{"helm":{"parameters":[
+    {"name":"trident.amr.sourceAppUID","value":"'"${SOURCE_UID}"'"},
+    {"name":"trident.amr.desiredState","value":"Promoted"}
+  ]}}}}' 
 
 echo "⏳ Waiting for AppMirrorRelationship to become Promoted..."
 for i in {1..30}; do
