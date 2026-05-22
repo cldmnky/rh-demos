@@ -79,4 +79,4 @@ spec:
         name: smoke-test
       params:
         - name: url
-          value: http://centos-vm-blue-ssh.vm-prod.svc.cluster.local/health
+          value: http://centos-vm-lb.vm-prod.svc.cluster.local/health
