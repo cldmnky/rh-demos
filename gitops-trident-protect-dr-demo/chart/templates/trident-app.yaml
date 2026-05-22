@@ -5,4 +5,4 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   includedNamespaces:
-    - namespaceName: {{ .Release.Namespace }}
+    - namespace: {{ .Release.Namespace }}
