@@ -25,9 +25,7 @@ function helm_param() {
   if command -v argocd &>/dev/null && argocd app get "${app}" -N openshift-gitops &>/dev/null; then
     argocd app set "${app}" ${params} -N openshift-gitops >/dev/null 2>&1
   else
-    # Build JSON array of parameter objects
-    local json="["
-    local first=true
+    local json="["; local first=true
     for p in "$@"; do
       local name="${p%%=*}"
       local value="${p#*=}"
@@ -66,7 +64,7 @@ ssh_authorized_keys:
     --dry-run=client -o yaml | oc apply -f -
 done
 
-# Step 3: Deploy Production application via ArgoCD
+# Step 3: Deploy Production VM + Kick off S3 Backup/Restore
 echo "📦 Step 3: Deploying Production Application via ArgoCD..."
 echo "   Creating global ArgoCD controller ClusterRoleBinding..."
 oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -
@@ -83,141 +81,23 @@ for i in {1..30}; do
   sleep 5
 done
 if [[ "${STATE}" != "True" ]]; then
-  echo "❌ Error: Trident Protect Application did not reach Ready state." >&2
-  exit 1
+  echo "❌ Error: Trident Protect Application did not reach Ready state." >&2; exit 1
 fi
 
 echo "⏳ Waiting for Production CentOS VM Blue to be Running..."
 for i in {1..40}; do
   STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
   echo "   VM Blue status: ${STATUS}"
-  if [[ "${STATUS}" == "Running" ]]; then
-    break
-  fi
+  if [[ "${STATUS}" == "Running" ]]; then break; fi
   sleep 5
 done
 if [[ "${STATUS}" != "Running" ]]; then
-  echo "❌ Error: VM Blue did not reach Running state." >&2
-  exit 1
+  echo "❌ Error: VM Blue did not reach Running state." >&2; exit 1
 fi
 echo "✅ Production VM Blue is successfully Running!"
 
-# Step 4: Install App v1.0 on Blue VM via Tekton & Ansible
-echo "🤖 Step 4: Installing App v1.0 on Blue VM via Tekton & Ansible..."
-oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
-
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/ansible-run-playbook.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/smoke-test.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/install-pipeline.yaml" -n vm-prod
-
-INSTALL_PR=$(oc create -f "${DEMO_ROOT}/pipelines/install-pipelinerun.yaml" -n vm-prod -o name)
-echo "   Install PipelineRun created: ${INSTALL_PR}"
-
-echo "⏳ Waiting for Install PipelineRun to complete..."
-for i in {1..60}; do
-  COND=$(oc get "${INSTALL_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
-  REASON=$(oc get "${INSTALL_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || true)
-  echo "   Install Pipeline status: ${COND} (Reason: ${REASON})"
-  if [[ "${COND}" == "True" ]]; then
-    break
-  fi
-  if [[ "${COND}" == "False" ]]; then
-    echo "❌ Error: Install PipelineRun failed!" >&2
-    oc logs -n vm-prod -l tekton.dev/pipeline=install-app --all-containers --tail=100 || true
-    exit 1
-  fi
-  sleep 10
-done
-echo "✅ App v1.0 successfully installed on Blue VM!"
-
-# Step 5: Upgrade to App v2.0 on Green VM via Blue Snapshot Clone
-echo "🚀 Step 5: Upgrading App to v2.0 on Green VM using Trident Snapshot clone..."
-oc apply -f "${DEMO_ROOT}/pipelines/upgrade-pipeline.yaml" -n vm-prod
-
-UPGRADE_PR=$(oc create -f "${DEMO_ROOT}/pipelines/upgrade-pipelinerun.yaml" -n vm-prod -o name)
-echo "   Upgrade PipelineRun created: ${UPGRADE_PR}"
-
-echo "⏳ Waiting for Upgrade PipelineRun to complete..."
-for i in {1..60}; do
-  COND=$(oc get "${UPGRADE_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
-  REASON=$(oc get "${UPGRADE_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || true)
-  echo "   Upgrade Pipeline status: ${COND} (Reason: ${REASON})"
-  if [[ "${COND}" == "True" ]]; then
-    break
-  fi
-  if [[ "${COND}" == "False" ]]; then
-    echo "❌ Error: Upgrade PipelineRun failed!" >&2
-    oc logs -n vm-prod -l tekton.dev/pipeline=upgrade-app --all-containers --tail=100 || true
-    exit 1
-  fi
-  sleep 10
-done
-
-echo "🔍 Verifying VM Green is Running and VM Blue is Halted..."
-VM_GREEN_STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
-VM_BLUE_STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
-echo "   VM Green Status: ${VM_GREEN_STATUS}, VM Blue Status: ${VM_BLUE_STATUS}"
-if [[ "${VM_GREEN_STATUS}" != "Running" ]]; then
-  echo "❌ Error: Green VM must be Running after upgrade." >&2
-  exit 1
-fi
-if [[ "${VM_BLUE_STATUS}" != "Stopped" && "${VM_BLUE_STATUS}" != "Stopping" ]]; then
-  echo "❌ Error: Blue VM must be Stopped or Stopping after upgrade cutover." >&2
-  exit 1
-fi
-echo "✅ App v2.0 Blue/Green upgrade completed successfully!"
-
-# Step 6: Presenter-Driven Rollback to Blue
-echo "🔁 Step 6: Simulating presenter-driven manual rollback to Blue VM..."
-echo "   Step 6.1: Restarting Blue VM while traffic still flows to Green..."
-helm_param trident-dr-prod \
-  "blue.runStrategy=Always" \
-  "green.runStrategy=Always" \
-  "traffic.activeSlot=green"
-
-echo "⏳ Waiting for Blue VM to return to Running state..."
-for i in {1..40}; do
-  STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
-  echo "   VM Blue Status: ${STATUS}"
-  if [[ "${STATUS}" == "Running" ]]; then
-    break
-  fi
-  sleep 5
-done
-
-echo "   Step 6.2: Redirecting traffic to Blue VM and halting Green VM..."
-helm_param trident-dr-prod \
-  "blue.runStrategy=Always" \
-  "green.runStrategy=Halted" \
-  "traffic.activeSlot=blue"
-
-echo "⏳ Waiting for Green VM to be Halted..."
-for i in {1..40}; do
-  STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
-  echo "   VM Green Status: ${STATUS}"
-  if [[ "${STATUS}" == "Stopped" || "${STATUS}" == "Stopping" ]]; then
-    break
-  fi
-  sleep 5
-done
-
-echo "   Step 6.3: Clearing ArgoCD parameter overrides to restore Git baseline..."
-helm_param trident-dr-prod
-
-echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline..."
-for i in {1..30}; do
-  BLUE_STRAT=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
-  GREEN_STRAT=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
-  echo "   Blue: ${BLUE_STRAT}, Green: ${GREEN_STRAT}"
-  if [[ "${BLUE_STRAT}" == "Always" && "${GREEN_STRAT}" == "Halted" ]]; then
-    break
-  fi
-  sleep 5
-done
-echo "✅ Manual rollback to Blue VM completed successfully!"
-
-# Step 7: S3 Cloud Backup & Restore DR (Pattern B)
-echo "☁️ Step 7: Testing Pattern B (S3 Backup & Restore) via Tekton..."
+# Kick off S3 Backup/Restore pipeline EARLY — it runs in background (Kopia restore takes ~14 min)
+echo "☁️ Step 3.5: Firing S3 Backup/Restore DR pipeline (runs in background while we do lifecycle steps)..."
 oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-backup.yaml" -n vm-prod
 oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-restore.yaml" -n vm-prod
 oc apply -f "${DEMO_ROOT}/pipelines/dr-pipeline.yaml" -n vm-prod
@@ -243,51 +123,108 @@ EOF
 )
 echo "   DR PipelineRun created: ${DR_PR}"
 
-echo "⏳ Waiting for DR PipelineRun to complete..."
+# Step 4: Install App v1.0 on Blue VM via Tekton & Ansible
+echo "🤖 Step 4: Installing App v1.0 on Blue VM via Tekton & Ansible..."
+oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
+
+oc apply -f "${DEMO_ROOT}/pipelines/tasks/ansible-run-playbook.yaml" -n vm-prod
+oc apply -f "${DEMO_ROOT}/pipelines/tasks/smoke-test.yaml" -n vm-prod
+oc apply -f "${DEMO_ROOT}/pipelines/install-pipeline.yaml" -n vm-prod
+
+INSTALL_PR=$(oc create -f "${DEMO_ROOT}/pipelines/install-pipelinerun.yaml" -n vm-prod -o name)
+echo "   Install PipelineRun created: ${INSTALL_PR}"
+
+echo "⏳ Waiting for Install PipelineRun to complete..."
 for i in {1..60}; do
-  COND=$(oc get "${DR_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
-  REASON=$(oc get "${DR_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || true)
-  echo "   DR Pipeline status: ${COND} (Reason: ${REASON})"
-  if [[ "${COND}" == "True" ]]; then
-    break
-  fi
+  COND=$(oc get "${INSTALL_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
+  REASON=$(oc get "${INSTALL_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || true)
+  echo "   Install Pipeline status: ${COND} (Reason: ${REASON})"
+  if [[ "${COND}" == "True" ]]; then break; fi
   if [[ "${COND}" == "False" ]]; then
-    echo "❌ Error: DR PipelineRun failed!" >&2
+    echo "❌ Error: Install PipelineRun failed!" >&2
+    exit 1
+  fi
+  sleep 10
+done
+echo "✅ App v1.0 successfully installed on Blue VM!"
+
+# Step 5: Upgrade to App v2.0 on Green VM via Blue Snapshot Clone
+echo "🚀 Step 5: Upgrading App to v2.0 on Green VM using Trident Snapshot clone..."
+oc apply -f "${DEMO_ROOT}/pipelines/upgrade-pipeline.yaml" -n vm-prod
+
+UPGRADE_PR=$(oc create -f "${DEMO_ROOT}/pipelines/upgrade-pipelinerun.yaml" -n vm-prod -o name)
+echo "   Upgrade PipelineRun created: ${UPGRADE_PR}"
+
+echo "⏳ Waiting for Upgrade PipelineRun to complete..."
+for i in {1..60}; do
+  COND=$(oc get "${UPGRADE_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
+  REASON=$(oc get "${UPGRADE_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || true)
+  echo "   Upgrade Pipeline status: ${COND} (Reason: ${REASON})"
+  if [[ "${COND}" == "True" ]]; then break; fi
+  if [[ "${COND}" == "False" ]]; then
+    echo "❌ Error: Upgrade PipelineRun failed!" >&2
     exit 1
   fi
   sleep 10
 done
 
-echo "🔍 Verifying Pattern B Restored Application in vm-dr-backup..."
-for i in {1..60}; do
-  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app-restored -n vm-dr-backup -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
-  if [[ "${STATE}" == "True" ]]; then
-    break
-  fi
+echo "🔍 Verifying VM Green is Running and VM Blue is Halted..."
+VM_GREEN_STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+VM_BLUE_STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+echo "   VM Green Status: ${VM_GREEN_STATUS}, VM Blue Status: ${VM_BLUE_STATUS}"
+if [[ "${VM_GREEN_STATUS}" != "Running" ]]; then
+  echo "❌ Error: Green VM must be Running after upgrade." >&2; exit 1
+fi
+if [[ "${VM_BLUE_STATUS}" != "Stopped" && "${VM_BLUE_STATUS}" != "Stopping" ]]; then
+  echo "❌ Error: Blue VM must be Stopped or Stopping after upgrade cutover." >&2; exit 1
+fi
+echo "✅ App v2.0 Blue/Green upgrade completed successfully!"
+
+# Step 6: Presenter-Driven Rollback to Blue
+echo "🔁 Step 6: Simulating presenter-driven manual rollback to Blue VM..."
+echo "   Step 6.1: Restarting Blue VM while traffic still flows to Green..."
+helm_param trident-dr-prod \
+  "blue.runStrategy=Always" \
+  "green.runStrategy=Always" \
+  "traffic.activeSlot=green"
+
+echo "⏳ Waiting for Blue VM to return to Running state..."
+for i in {1..40}; do
+  STATUS=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+  echo "   VM Blue Status: ${STATUS}"
+  if [[ "${STATUS}" == "Running" ]]; then break; fi
   sleep 5
 done
-if [[ "${STATE}" != "True" ]]; then
-  echo "❌ Error: Restored Trident Application is not Ready." >&2
-  exit 1
-fi
 
-echo "⏳ Waiting for Restored VM to become Running in vm-dr-backup..."
-for i in {1..90}; do
-  STATUS=$(oc get vm centos-vm-blue -n vm-dr-backup -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
-  echo "   Restored VM status: ${STATUS}"
-  if [[ "${STATUS}" == "Running" ]]; then
-    break
-  fi
+echo "   Step 6.2: Redirecting traffic to Blue VM and halting Green VM..."
+helm_param trident-dr-prod \
+  "blue.runStrategy=Always" \
+  "green.runStrategy=Halted" \
+  "traffic.activeSlot=blue"
+
+echo "⏳ Waiting for Green VM to be Halted..."
+for i in {1..40}; do
+  STATUS=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+  echo "   VM Green Status: ${STATUS}"
+  if [[ "${STATUS}" == "Stopped" || "${STATUS}" == "Stopping" ]]; then break; fi
   sleep 5
 done
-if [[ "${STATUS}" != "Running" ]]; then
-  echo "❌ Error: Restored VM did not reach Running state in vm-dr-backup." >&2
-  exit 1
-fi
-echo "✅ Pattern B E2E Backup & Restore Successful!"
 
-# Step 8: SnapMirror Replication DR (Pattern A)
-echo "🔗 Step 8: Testing Pattern A (SnapMirror AMR) via ArgoCD..."
+echo "   Step 6.3: Clearing ArgoCD parameter overrides to restore Git baseline..."
+helm_param trident-dr-prod
+
+echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline..."
+for i in {1..30}; do
+  BLUE_STRAT=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
+  GREEN_STRAT=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
+  echo "   Blue: ${BLUE_STRAT}, Green: ${GREEN_STRAT}"
+  if [[ "${BLUE_STRAT}" == "Always" && "${GREEN_STRAT}" == "Halted" ]]; then break; fi
+  sleep 5
+done
+echo "✅ Manual rollback to Blue VM completed successfully!"
+
+# Step 7: SnapMirror Replication DR (Pattern A)
+echo "🔗 Step 7: Testing Pattern A (SnapMirror AMR) via ArgoCD..."
 echo "   📸 Creating source snapshot for SnapMirror relationship..."
 cat <<EOF | oc apply -f -
 apiVersion: protect.trident.netapp.io/v1
@@ -304,14 +241,11 @@ echo "⏳ Waiting for source snapshot to reach Completed state..."
 for i in {1..30}; do
   STATE=$(oc get snapshot source-vm-snap -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null || true)
   echo "   Snapshot state: ${STATE}"
-  if [[ "${STATE}" == "Completed" ]]; then
-    break
-  fi
+  if [[ "${STATE}" == "Completed" ]]; then break; fi
   sleep 5
 done
 if [[ "${STATE}" != "Completed" ]]; then
-  echo "❌ Error: Source snapshot did not complete." >&2
-  exit 1
+  echo "❌ Error: Source snapshot did not complete." >&2; exit 1
 fi
 
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}')
@@ -321,9 +255,7 @@ echo "   Deploying DR Mirror Application in ArgoCD..."
 oc apply -f "${DEMO_ROOT}/argocd/argocd-dr-mirror-app.yaml"
 
 echo "⏳ Waiting for namespace vm-dr-mirror to be created..."
-until oc get ns vm-dr-mirror &>/dev/null; do
-  sleep 2
-done
+until oc get ns vm-dr-mirror &>/dev/null; do sleep 2; done
 
 echo "   Injecting Source App UID into ArgoCD Helm Parameters..."
 helm_param trident-dr-mirror "trident.amr.sourceAppUID=${SOURCE_UID}"
@@ -332,46 +264,69 @@ echo "⏳ Waiting for AppMirrorRelationship to become Established..."
 for i in {1..60}; do
   STATE=$(oc get amr vm-mirror-relationship -n vm-dr-mirror -o jsonpath='{.status.state}' 2>/dev/null || true)
   echo "   AMR State: ${STATE}"
-  if [[ "${STATE}" == "Established" ]]; then
-    break
-  fi
+  if [[ "${STATE}" == "Established" ]]; then break; fi
   sleep 10
 done
 if [[ "${STATE}" != "Established" ]]; then
-  echo "❌ Error: AppMirrorRelationship did not reach Established state." >&2
-  exit 1
+  echo "❌ Error: AppMirrorRelationship did not reach Established state." >&2; exit 1
 fi
 
-echo "📢 Simulating GitOps-Driven DR Failover (Promoting relationship) via argocd app set..."
+echo "📢 Simulating GitOps-Driven DR Failover (Promoting relationship)..."
 helm_param trident-dr-mirror "trident.amr.sourceAppUID=${SOURCE_UID}" "trident.amr.desiredState=Promoted"
 
 echo "⏳ Waiting for AppMirrorRelationship to become Promoted..."
 for i in {1..30}; do
   STATE=$(oc get amr vm-mirror-relationship -n vm-dr-mirror -o jsonpath='{.status.state}' 2>/dev/null || true)
   echo "   AMR State after promotion: ${STATE}"
-  if [[ "${STATE}" == "Promoted" ]]; then
-    break
-  fi
+  if [[ "${STATE}" == "Promoted" ]]; then break; fi
   sleep 10
 done
 if [[ "${STATE}" != "Promoted" ]]; then
-  echo "❌ Error: AppMirrorRelationship did not reach Promoted state." >&2
-  exit 1
+  echo "❌ Error: AppMirrorRelationship did not reach Promoted state." >&2; exit 1
 fi
 
 echo "⏳ Waiting for Mirrored VM to become Running in vm-dr-mirror..."
 for i in {1..40}; do
   STATUS=$(oc get vm centos-vm-blue -n vm-dr-mirror -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
   echo "   Mirrored VM status: ${STATUS}"
-  if [[ "${STATUS}" == "Running" ]]; then
-    break
-  fi
+  if [[ "${STATUS}" == "Running" ]]; then break; fi
   sleep 5
 done
 if [[ "${STATUS}" != "Running" ]]; then
-  echo "❌ Error: Mirrored VM did not reach Running state in vm-dr-mirror." >&2
-  exit 1
+  echo "❌ Error: Mirrored VM did not reach Running state in vm-dr-mirror." >&2; exit 1
+fi
+echo "✅ Pattern A E2E Mirror DR Promotion Successful!"
+
+# Step 8: Verify S3 Backup/Restore Results (should be done by now, Kopia has been running in background)
+echo "☁️ Step 8: Checking S3 Backup/Restore results (Kopia restore has been running in background)..."
+echo "⏳ Waiting for DR PipelineRun to complete..."
+for i in {1..30}; do
+  COND=$(oc get "${DR_PR}" -n vm-prod -o jsonpath='{.status.conditions[0].status}' 2>/dev/null || true)
+  echo "   DR Pipeline status: ${COND}"
+  if [[ "${COND}" == "True" ]]; then break; fi
+  if [[ "${COND}" == "False" ]]; then echo "❌ Error: DR PipelineRun failed!" >&2; exit 1; fi
+  sleep 10
+done
+
+echo "🔍 Verifying Pattern B Restored Application in vm-dr-backup..."
+for i in {1..60}; do
+  STATE=$(oc get application.protect.trident.netapp.io centos-vm-app-restored -n vm-dr-backup -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+  if [[ "${STATE}" == "True" ]]; then break; fi
+  sleep 5
+done
+if [[ "${STATE}" != "True" ]]; then
+  echo "❌ Error: Restored Trident Application is not Ready." >&2; exit 1
 fi
 
-echo "✅ Pattern A E2E Mirror DR Promotion Successful!"
+echo "⏳ Waiting for Restored VM to become Running in vm-dr-backup..."
+for i in {1..90}; do
+  STATUS=$(oc get vm centos-vm-blue -n vm-dr-backup -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)
+  echo "   Restored VM status: ${STATUS}"
+  if [[ "${STATUS}" == "Running" ]]; then break; fi
+  sleep 5
+done
+if [[ "${STATUS}" != "Running" ]]; then
+  echo "❌ Error: Restored VM did not reach Running state in vm-dr-backup." >&2; exit 1
+fi
+echo "✅ Pattern B E2E Backup & Restore Successful!"
 echo "🎉 All E2E Flows passed successfully!"

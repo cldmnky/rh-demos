@@ -44,43 +44,29 @@ To present this demo effectively, it is essential to understand the underlying d
 
 ## Core Narrative
 
-The demo should run in six acts.
+The demo runs in six acts. **Act 1 kicks off the long-running S3 backup/restore pipeline first**, so it completes in the background while the presenter demonstrates the application lifecycle in Acts 2–5. Act 6 comes back to inspect the restored namespace.
 
-### Act 1: GitOps Creates The VM Platform
+Parameter management uses the **`argocd` CLI** (`argocd app set --parameter`) for clean, readable rollbacks and DR promotion instead of verbose JSON patches.
 
-Start with Git, not the console wizard.
+### Act 1: Kick off S3 Cloud Backup & Restore (Runs in Background ~14 min)
+
+The production VM is deployed first. While it boots, the S3 backup and restore pipeline is fired off immediately. The Tekton backup task copies the 30GB volume to AWS S3 and submits a `BackupRestore` CR. The Kopia data mover starts restoring blocks from S3 in the background — the presenter moves on to demo the lifecycle.
 
 Show:
-
-- `argocd/argocd-prod-app.yaml`: ArgoCD owns the app.
-- `chart/values.yaml`: VM defaults, storage class, boot source snapshot, and Trident settings.
-- `chart/templates/vm.yaml`: the VM is a Kubernetes object.
-- `chart/templates/trident-app.yaml`: Trident Protect tracks the namespace as an application.
+- `argocd/argocd-prod-app.yaml`: ArgoCD owns the production environment.
+- `chart/values.yaml`: Blue VM active, Green halted, traffic on blue.
+- Pipeline tasks and DR pipeline definition.
+- The Trident Protect `Application` resource tracking `vm-prod`.
 
 Run:
-
 ```bash
-oc create clusterrolebinding openshift-gitops-controller-admin-global \
-  --clusterrole=cluster-admin \
-  --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller \
-  --dry-run=client -o yaml | oc apply -f -
-
-oc apply -f gitops-trident-protect-dr-demo/argocd/argocd-prod-app.yaml
+oc apply -f argocd/argocd-prod-app.yaml
+tkn pipeline start trident-dr-pipeline -n vm-prod \
+  -p application-name=centos-vm-app \
+  -p destination-namespace=vm-dr-backup --showlog
 ```
 
-Console moment:
-
-- Open the OpenShift console.
-- Go to `Virtualization -> VirtualMachines`.
-- Select project `vm-prod`.
-- Show `centos-vm` running.
-- Open the VM details page and point out CPU, memory, disk, network, and YAML tabs.
-
-Speaker note:
-
-> This is the first contrast with vCenter. We can still give operators a familiar VM console, but the source of truth is Git and Kubernetes controllers. A VM is no longer a ticket plus a wizard. It is a reviewed, versioned artifact.
-
-### Act 2: Tekton Installs The Application
+### Act 2: Tekton + Ansible — Deploy App v1.0
 
 The VM is running, but the application should not be installed by a human SSH session.
 
@@ -109,146 +95,84 @@ Speaker note:
 
 > The guest is still a VM, but operations are no longer a manual VM procedure. Tekton gives us the same pipeline discipline we use for containers: logs, task status, retries, and auditability.
 
-### Act 3: Upgrade The Application With Blue/Green VM Lifecycle
+### Act 3: Blue/Green Upgrade using Trident Snapshots
 
-This is the main virtualization modernization moment.
+The main virtualization modernization moment. One Git commit triggers a pipeline that:
 
-The desired story is the same proven pattern as the existing VMware demo:
+1. Takes a Trident Protect `Snapshot` of the Blue VM (safety net + clone source).
+2. Resolves the generated CSI `VolumeSnapshot` for the Blue root disk PVC.
+3. Patches ArgoCD parameters to start Green from the Blue snapshot (instant ONTAP clone).
+4. Ansible upgrades the app on Green to v2.0.
+5. Smoke-tests Green's `/health` directly.
+6. Cuts traffic to Green and halts Blue.
 
-1. Blue VM is active and serving v1.0.
-2. A single Git change bumps `pipelines/app-version.yaml` from `v1.0` to `v2.0`.
-3. Tekton snapshots the active blue VM before changing anything.
-4. Tekton resolves the generated rootdisk `VolumeSnapshot`.
-5. ArgoCD Helm parameters start a green VM from the blue rootdisk snapshot.
-6. Tekton upgrades the app on green to v2.0.
-7. Tekton smoke-tests green directly.
-8. If the smoke test passes, ArgoCD moves traffic to green and halts blue.
-9. If the smoke test fails, traffic remains on blue and green is halted or deleted.
+Runtime state changes happen via ArgoCD Helm parameters — no Git commits for transient VM state.
 
-The upgrade should not commit transient runtime state back to Git. Git records the app version bump. Runtime state changes are ArgoCD Helm parameter overrides.
-
-Recommended commands to narrate:
-
+Commands:
 ```bash
 ruby -0pi -e 'gsub(/version: "v[0-9.]+"/, "version: \"v2.0\"")' \
-  gitops-trident-protect-dr-demo/pipelines/app-version.yaml
-
-git add gitops-trident-protect-dr-demo/pipelines/app-version.yaml
+  pipelines/app-version.yaml
+git add pipelines/app-version.yaml
 git commit -m 'bump app version to v2.0'
-git pull --rebase --autostash origin main && git push origin main
+git push origin main
+tkn pipeline start upgrade-app -n vm-prod --showlog
 ```
 
-Console moment:
+### Act 4: GitOps Declarative Rollback
 
-- In ArgoCD, show the production app rendering the Helm chart.
-- In the OpenShift console, show two VMs during the upgrade: blue running and green starting.
-- In the Pipelines UI, show the upgrade pipeline DAG: snapshot, start green, upgrade, smoke test, cutover.
-- In the OpenShift console, show the service selector moving from blue to green.
-
-Speaker note:
-
-> This is not just backup. This is day-2 VM operations as code. We are using storage snapshots to make green a point-in-time clone of blue, then using Tekton to make the app change safe before moving traffic.
-
-### Act 4: Roll Back Without Rebuilding The World
-
-Rollback should be shown immediately after upgrade, because it proves the operating model.
-
-Rollback story:
-
-1. Blue is restarted while traffic still flows to green.
-2. ArgoCD parameters move traffic back to blue.
-3. Green is halted or deleted.
-4. Helm overrides are cleared so the Git baseline takes over again.
-5. The service returns to v1.0 on blue.
-
-Use the existing VMware demo rollback as the implementation reference:
-
-- Patch blue `runStrategy=Always`.
-- Wait for the blue VMI to be ready.
-- Patch service traffic back to blue.
-- Halt or delete green.
-- Clear ArgoCD Helm parameters.
-
-Console moment:
-
-- In OpenShift Virtualization, show blue moving back to `Running` and green moving to `Halted`.
-- In ArgoCD, show Helm parameter overrides before and after cleanup.
-- In Pipelines, show rollback as a controlled operation rather than an emergency SSH session.
-
-Speaker note:
-
-> Rollback is where VM automation usually becomes manual. Here it stays declarative. The service selector and VM run strategies are state, and controllers converge them.
-
-### Act 5: Pattern B, S3 Backup And Namespace Restore
-
-After proving app lifecycle, introduce Trident Protect as the safety net and mobility layer.
-
-This pattern is portable and easy to understand:
-
-1. Tekton creates a Trident Protect `Backup` for `centos-vm-app`.
-2. Trident Protect snapshots the VM storage and archives metadata and data through `lab-vault`.
-3. Tekton creates a `BackupRestore` in `vm-dr-backup`.
-4. Trident Protect maps `vm-prod` to `vm-dr-backup`.
-5. The VM and PVC are recreated from S3-backed backup data.
-
-Run:
+Rollback is presenter-driven, using `argocd app set` for clean, readable parameter management:
 
 ```bash
-oc apply -f gitops-trident-protect-dr-demo/pipelines/tasks/trident-protect-backup.yaml -n vm-prod
-oc apply -f gitops-trident-protect-dr-demo/pipelines/tasks/trident-protect-restore.yaml -n vm-prod
-oc apply -f gitops-trident-protect-dr-demo/pipelines/dr-pipeline.yaml -n vm-prod
+# Step 1: Restart Blue while traffic still flows to Green
+argocd app set trident-dr-prod -N openshift-gitops \
+  -p blue.runStrategy=Always \
+  -p green.runStrategy=Always \
+  -p traffic.activeSlot=green
+
+# Step 2: Shift traffic back to Blue, halt Green
+argocd app set trident-dr-prod -N openshift-gitops \
+  -p blue.runStrategy=Always \
+  -p green.runStrategy=Halted \
+  -p traffic.activeSlot=blue
+
+# Step 3: Clear all parameters — ArgoCD restores Git baseline
+argocd app set trident-dr-prod -N openshift-gitops
 ```
 
-Console moment:
+### Act 5: GitOps-Driven SnapMirror DR Failover
 
-- In the Pipelines UI, show the DR pipeline running.
-- In `trident-protect`, show the Kopia backup or restore pod while data is moving.
-- In `vm-dr-backup`, show the restored VM appearing.
-- In OpenShift Virtualization, open the restored VM console and validate the app/data.
+Pattern A uses `AppMirrorRelationship` for warm-standby DR. Block replication at the ONTAP storage layer, metadata staging in S3:
 
-Speaker note:
-
-> This is the portable DR path. It works when you want an on-demand recovery point, namespace-level mobility, or a restore into a different target environment using object storage.
-
-### Act 6: Pattern A, SnapMirror-Based Warm Standby
-
-End with the high-performance DR story.
-
-Pattern A uses Trident Protect `AppMirrorRelationship` to create a warm standby using NetApp SnapMirror semantics.
-
-Flow:
-
-1. Source `Application` runs in `vm-prod`.
-2. ArgoCD deploys the mirror chart into `vm-dr-mirror`.
-3. The AMR is `Established` and the target PVC is read-only.
-4. Failover changes `desiredState` to `Promoted`.
-5. Trident Protect promotes storage to read-write and recreates the VM metadata.
-6. The VM boots in the DR namespace.
-
-Run:
+1. Create a Trident Protect `Snapshot` to seed the mirror.
+2. Deploy the mirror ArgoCD Application into `vm-dr-mirror`.
+3. Link to the source Application UID via `argocd app set`.
+4. Promote the relationship to `Promoted` — volumes become Read-Write, VM boots.
 
 ```bash
-oc apply -f gitops-trident-protect-dr-demo/argocd/argocd-dr-mirror-app.yaml
+cat <<EOF | oc apply -f -
+apiVersion: protect.trident.netapp.io/v1
+kind: Snapshot
+metadata: { name: source-vm-snap, namespace: vm-prod }
+spec: { applicationRef: centos-vm-app, appVaultRef: lab-vault }
+EOF
 
-SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod \
-  -o jsonpath='{.metadata.uid}')
+oc apply -f argocd/argocd-dr-mirror-app.yaml
 
-oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=merge \
-  -p '{"spec":{"source":{"helm":{"parameters":[{"name":"trident.amr.sourceAppUID","value":"'"${SOURCE_UID}"'"}]}}}}'
+SOURCE_UID=$(oc get application.protect.trident.netapp.io \
+  centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}')
 
-oc patch application.argoproj.io trident-dr-mirror -n openshift-gitops --type=json \
-  -p '[{"op":"add","path":"/spec/source/helm/parameters/1","value":{"name":"trident.amr.desiredState","value":"Promoted"}}]'
+argocd app set trident-dr-mirror -N openshift-gitops \
+  -p trident.amr.sourceAppUID="${SOURCE_UID}" \
+  -p trident.amr.desiredState=Promoted
 ```
 
-Console moment:
+### Act 6: Verify S3 Backup/Restore Results
 
-- In ArgoCD, show `trident-dr-mirror` syncing Helm parameters.
-- In OpenShift console, show the `AppMirrorRelationship` custom resource state change from `Established` to `Promoted`.
-- In Virtualization, switch to `vm-dr-mirror` and show the promoted VM running.
+By now the Kopia data mover has finished restoring the 30GB volume from AWS S3. Navigate to `vm-dr-backup` and show the restored VM running.
 
-Speaker note:
-
-> This is the warm-standby path. S3 backup/restore is portable. SnapMirror is fast. Both are controlled by Kubernetes APIs and can be driven by GitOps.
+```bash
+oc get vm -n vm-dr-backup
+```
 
 ## Recommended Console Flow
 
@@ -256,27 +180,26 @@ Use the console intentionally. Do not stay in the terminal the whole time.
 
 | Moment | Console | What To Show | Why It Matters |
 |---|---|---|---|
-| VM creation | OpenShift Virtualization | `centos-vm` in `vm-prod` | Operators still get a VM console and VM inventory |
+| S3 backup kick-off | Pipelines + Trident CRs | `Backup`, `BackupRestore`, Kopia pod | Long-running backup runs in background |
+| VM creation | OpenShift Virtualization | `centos-vm-blue` / `centos-vm-green` in `vm-prod` | Operators still get a VM console and VM inventory |
 | GitOps sync | ArgoCD | `trident-dr-prod` app and rendered Helm resources | Git is the source of truth |
 | App install | OpenShift Pipelines | `install-app` DAG and logs | Guest changes are auditable automation |
 | Upgrade | Pipelines + Virtualization | snapshot/start green/upgrade/smoke/cutover | VM lifecycle is pipeline-driven |
-| Rollback | ArgoCD + Virtualization | parameter overrides and VM run strategies | Recovery is declarative state, not panic ops |
-| Backup | Pipelines + Trident CRs | `Backup`, `BackupRestore`, Kopia pod | Trident Protect automates data protection |
+| Rollback | ArgoCD UI | `argocd app set` parameter changes | Recovery is declarative state, not panic ops |
 | Mirror DR | ArgoCD + Trident CRs | `AppMirrorRelationship` states | DR is GitOps-compatible |
+| S3 restore check | Virtualization + Trident CRs | Restored VM in `vm-dr-backup` | Portable DR from object storage |
 
 ## What Should Be Improved Next
 
-The current automated `test-flow.sh` validates the production VM, Pattern B backup/restore pipeline, and Pattern A AMR promotion flow. To make the live demo narrative match the stronger modernization story, the next implementation pass should add the application lifecycle from the existing VMware demo into this module.
+The current automated `test-flow.sh` validates the full lifecycle: production VM, Ansible install, Trident Protect snapshot-based Blue/Green upgrade, declarative rollback, S3 backup/restore DR, and SnapMirror AMR promotion.
 
 Prioritized improvements:
 
-1. Add `pipelines/app-version.yaml` with `v1.0` baseline and `v2.0` upgrade target.
-2. Port or adapt `install-pipeline.yaml`, `upgrade-pipeline.yaml`, `smoke-test.yaml`, and Ansible task concepts from `gitops-vmware-virt-demo`.
-3. Extend the Helm chart from a single VM to blue/green VMs plus a service selector.
-4. Keep Trident storage classes and boot sources as the backing storage story.
-5. Add rollback as a first-class Tekton pipeline or scripted act.
-6. Add console screenshots or presenter notes for OpenShift Virtualization, ArgoCD, Pipelines, and Trident Protect CRs.
-7. Keep `test-flow.sh` as the gate: no narrative step should be added to the live script unless the headless flow validates it.
+1. Add console screenshots or presenter notes for each act.
+2. Add a pre-recorded asciinema cast for the long-running Kopia restore to use as a transition.
+3. Parameterize hardcoded namespace names into environment variables for portability.
+4. Add an ArgoCD `AppProject` and dedicated RBAC scope instead of the broad `cluster-admin` binding.
+5. Integrate the `argocd app wait` command to eliminate polling loops in scripts.
 
 ## Architecture
 
@@ -315,16 +238,27 @@ gitops-trident-protect-dr-demo/
 │   ├── values-dr-mirror.yaml
 │   ├── values-dr-backup.yaml
 │   └── templates/
-│       ├── vm.yaml
-│       ├── service.yaml
+│       ├── vm-blue.yaml
+│       ├── vm-green.yaml
+│       ├── service-lb.yaml
+│       ├── service-blue-ssh.yaml
+│       ├── service-green-ssh.yaml
+│       ├── service-green-http.yaml
 │       ├── trident-app.yaml
 │       └── trident-amr.yaml
 ├── argocd/
 │   ├── argocd-prod-app.yaml
 │   └── argocd-dr-mirror-app.yaml
 ├── pipelines/
+│   ├── app-version.yaml
+│   ├── install-pipeline.yaml
+│   ├── install-pipelinerun.yaml
+│   ├── upgrade-pipeline.yaml
+│   ├── upgrade-pipelinerun.yaml
 │   ├── dr-pipeline.yaml
 │   └── tasks/
+│       ├── ansible-run-playbook.yaml
+│       ├── smoke-test.yaml
 │       ├── trident-protect-backup.yaml
 │       └── trident-protect-restore.yaml
 ├── scripts/
