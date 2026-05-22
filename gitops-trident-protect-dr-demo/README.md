@@ -22,6 +22,26 @@ Use this demo when the audience cares about any of these questions:
 - How do we protect a VM with NetApp snapshots, backups, and replication?
 - How do GitOps, Tekton, OpenShift Virtualization, and Trident fit together in a single operating model?
 
+## NetApp Trident Protect Core Concepts
+
+To present this demo effectively, it is essential to understand the underlying declarative custom resources introduced by Trident Protect:
+
+1.  **`Application` (protect.trident.netapp.io)**: 
+    *   Defines the logical boundary of our application (by namespace, labels, or resource filters). 
+    *   Treats the virtual machine, persistent volumes, and all associated Kubernetes manifests (Configs, Services, Secrets) as a single, consistent logical entity for backup or replication.
+2.  **`AppVault` (protect.trident.netapp.io)**: 
+    *   The declarative Kubernetes representation of an offsite object-storage target (like an AWS S3 bucket).
+    *   Used by Trident Protect to securely archive and synchronize volume block payloads, metadata, and cluster snapshots.
+3.  **`Snapshot` & `ExecHook`**: 
+    *   Instantly captures the point-in-time state of both storage PVs and application metadata. 
+    *   Seamlessly integrates with `ExecHook` resources to execute shell scripts (such as filesystem freezes and database flushes) inside the Guest OS container/pod, delivering guaranteed **application-consistency**.
+4.  **`Backup` & `BackupRestore`**: 
+    *   Uses the high-performance **Kopia** data mover to pack, deduplicate, encrypt, and copy point-in-time volume blocks and metadata to the S3 `AppVault`.
+    *   `BackupRestore` reads this archive and recreates the target namespaces, PVs, and KubeVirt VMs from scratch.
+5.  **`AppMirrorRelationship` (AMR)**: 
+    *   Couples high-speed **asynchronous volume replication (SnapMirror)** directly at the NetApp ONTAP storage controller level with **Kubernetes metadata staging** in S3.
+    *   Enables completely declarative, GitOps-compatible warm-standby DR. Changing the `desiredState` to `Promoted` unblocks the destination volumes and automatically boots the standby VM in seconds.
+
 ## Core Narrative
 
 The demo should run in six acts.
