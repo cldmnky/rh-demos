@@ -1,0 +1,63 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: trident-protect-restore
+  namespace: vm-prod
+spec:
+  params:
+    - name: app-archive-path
+      type: string
+      description: "Archive path in S3 to restore from"
+    - name: destination-namespace
+      type: string
+      description: "Namespace to restore the application to"
+    - name: appvault-name
+      type: string
+      default: "lab-vault"
+      description: "Name of the AppVault"
+  steps:
+    - name: restore
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        #!/bin/bash
+        set -eu
+        RESTORE_NAME="vm-prod-restore"
+        DEST_NS="$(params.destination-namespace)"
+
+        # Ensure destination namespace exists
+        oc create namespace "${DEST_NS}" --dry-run=client -o yaml | oc apply -f -
+
+        # Delete prior restore if any
+        oc delete backuprestore "${RESTORE_NAME}" -n "${DEST_NS}" --ignore-not-found
+
+        echo "Triggering Trident Protect BackupRestore ${RESTORE_NAME} in namespace ${DEST_NS}..."
+        cat <<EOF | oc apply -f -
+        apiVersion: protect.trident.netapp.io/v1
+        kind: BackupRestore
+        metadata:
+          name: ${RESTORE_NAME}
+          namespace: ${DEST_NS}
+        spec:
+          appVaultRef: $(params.appvault-name)
+          appArchivePath: $(params.app-archive-path)
+          destinationApplicationName: centos-vm-app-restored
+          namespaceMapping:
+            - source: vm-prod
+              destination: ${DEST_NS}
+        EOF
+
+        echo "Waiting for BackupRestore to complete..."
+        for i in {1..40}; do
+          STATE=$(oc get backuprestore "${RESTORE_NAME}" -n "${DEST_NS}" -o jsonpath='{.status.state}' 2>/dev/null || true)
+          echo "Current Restore State: ${STATE}"
+          if [[ "${STATE}" == "Completed" ]]; then
+            break
+          fi
+          if [[ "${STATE}" == "Failed" ]]; then
+            echo "Restore failed!" >&2
+            exit 1
+          fi
+          sleep 10
+        done
+
+        echo "Restore completed successfully in namespace ${DEST_NS}!"

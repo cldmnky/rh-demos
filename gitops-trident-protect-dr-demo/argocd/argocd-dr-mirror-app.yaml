@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trident-dr-mirror
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/cldmnky/rh-demos
+    targetRevision: main
+    path: gitops-trident-protect-dr-demo/chart
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dr-mirror.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vm-dr-mirror
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

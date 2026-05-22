@@ -1,0 +1,32 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: trident-dr-pipeline
+  namespace: vm-prod
+spec:
+  params:
+    - name: application-name
+      type: string
+      default: "centos-vm-app"
+      description: "Name of the Trident application"
+    - name: destination-namespace
+      type: string
+      default: "vm-dr-backup"
+      description: "Target namespace for disaster recovery"
+  tasks:
+    - name: backup-step
+      taskRef:
+        name: trident-protect-backup
+      params:
+        - name: application-name
+          value: $(params.application-name)
+    - name: restore-step
+      runAfter:
+        - backup-step
+      taskRef:
+        name: trident-protect-restore
+      params:
+        - name: app-archive-path
+          value: $(tasks.backup-step.results.app-archive-path)
+        - name: destination-namespace
+          value: $(params.destination-namespace)

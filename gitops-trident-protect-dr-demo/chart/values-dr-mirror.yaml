@@ -1,0 +1,23 @@
+# DR Mirror environment values (vm-dr-mirror)
+# In Pattern A, the standby target does not deploy the VM locally (Trident Protect recreates it upon promotion).
+vm:
+  enabled: false
+
+storage:
+  storageClass: storage-class-iscsi
+  accessMode: ReadWriteMany
+  volumeMode: Block
+  size: 30Gi
+
+trident:
+  appName: centos-vm-app-mirror
+  amr:
+    enabled: true
+    name: vm-mirror-relationship
+    desiredState: Established
+    sourceAppVault: lab-vault
+    destinationAppVault: lab-vault
+    sourceAppName: centos-vm-app
+    sourceAppUID: "" # Set dynamically at runtime by the GitOps/failover pipeline
+    sourceNamespace: vm-prod
+    recurrenceRule: "FREQ=MINUTELY;INTERVAL=5"

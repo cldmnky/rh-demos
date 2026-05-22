@@ -1,0 +1,30 @@
+# Default values for trident-dr-demo
+
+vm:
+  enabled: true
+  name: centos-vm
+  app: centos-vm-app
+  runStrategy: Always
+  memory: 2Gi
+  cores: 2
+  sourceSnapshot: centos-stream10-bc3fd60ed98e
+  sourceSnapshotNamespace: openshift-virtualization-os-images
+
+storage:
+  storageClass: storage-class-iscsi
+  accessMode: ReadWriteMany
+  volumeMode: Block
+  size: 30Gi
+
+trident:
+  appName: centos-vm-app
+  amr:
+    enabled: false
+    name: vm-mirror-relationship
+    desiredState: Established
+    sourceAppVault: lab-vault
+    destinationAppVault: lab-vault
+    sourceAppName: centos-vm-app
+    sourceAppUID: "" # Filled in at runtime or via GitOps override
+    sourceNamespace: vm-prod
+    recurrenceRule: "FREQ=MINUTELY;INTERVAL=5"

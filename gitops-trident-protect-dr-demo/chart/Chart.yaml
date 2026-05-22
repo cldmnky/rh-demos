@@ -1,0 +1,5 @@
+apiVersion: v2
+name: trident-dr-demo
+description: GitOps & Pipeline-driven Disaster Recovery with NetApp Trident Protect
+type: application
+version: 0.1.0

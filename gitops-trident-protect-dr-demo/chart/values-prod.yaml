@@ -1,0 +1,15 @@
+# Production environment values (vm-prod)
+vm:
+  enabled: true
+  runStrategy: Always
+
+storage:
+  storageClass: storage-class-iscsi
+  accessMode: ReadWriteMany
+  volumeMode: Block
+  size: 30Gi
+
+trident:
+  appName: centos-vm-app
+  amr:
+    enabled: false

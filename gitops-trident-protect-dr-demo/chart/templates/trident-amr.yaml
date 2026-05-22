@@ -1,0 +1,18 @@
+{{- if .Values.trident.amr.enabled }}
+apiVersion: protect.trident.netapp.io/v1
+kind: AppMirrorRelationship
+metadata:
+  name: {{ .Values.trident.amr.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  desiredState: {{ .Values.trident.amr.desiredState }}
+  sourceAppVaultRef: {{ .Values.trident.amr.sourceAppVault }}
+  destinationAppVaultRef: {{ .Values.trident.amr.destinationAppVault }}
+  sourceApplicationName: {{ .Values.trident.amr.sourceAppName }}
+  sourceApplicationUID: {{ .Values.trident.amr.sourceAppUID | quote }}
+  storageClassName: {{ .Values.storage.storageClass }}
+  namespaceMapping:
+    - source: {{ .Values.trident.amr.sourceNamespace }}
+      destination: {{ .Release.Namespace }}
+  recurrenceRule: {{ .Values.trident.amr.recurrenceRule | quote }}
+{{- end }}

@@ -1,0 +1,64 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: trident-protect-backup
+  namespace: vm-prod
+spec:
+  params:
+    - name: application-name
+      type: string
+      description: "Name of the Trident Application to back up"
+    - name: appvault-name
+      type: string
+      default: "lab-vault"
+      description: "Name of the AppVault"
+  results:
+    - name: app-archive-path
+      description: "The path in S3 where the backup was archived"
+  steps:
+    - name: backup
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        #!/bin/bash
+        set -eu
+        BACKUP_NAME="vm-prod-backup"
+        # Delete prior backup if any
+        oc delete backup "${BACKUP_NAME}" -n vm-prod --ignore-not-found
+
+        echo "Creating Trident Protect Backup ${BACKUP_NAME} for Application $(params.application-name)..."
+        cat <<EOF | oc apply -f -
+        apiVersion: protect.trident.netapp.io/v1
+        kind: Backup
+        metadata:
+          name: ${BACKUP_NAME}
+          namespace: vm-prod
+        spec:
+          applicationRef: $(params.application-name)
+          appVaultRef: $(params.appvault-name)
+          dataMover: Kopia
+          reclaimPolicy: Delete
+        EOF
+
+        echo "Waiting for Backup to complete..."
+        # Wait until state is Completed
+        for i in {1..40}; do
+          STATE=$(oc get backup "${BACKUP_NAME}" -n vm-prod -o jsonpath='{.status.state}' 2>/dev/null || true)
+          echo "Current Backup State: ${STATE}"
+          if [[ "${STATE}" == "Completed" ]]; then
+            break
+          fi
+          if [[ "${STATE}" == "Failed" ]]; then
+            echo "Backup failed!" >&2
+            exit 1
+          fi
+          sleep 10
+        done
+
+        ARCHIVE_PATH=$(oc get backup "${BACKUP_NAME}" -n vm-prod -o jsonpath='{.status.appArchivePath}' 2>/dev/null || true)
+        if [[ -z "${ARCHIVE_PATH}" ]]; then
+          echo "Could not resolve appArchivePath for ${BACKUP_NAME}" >&2
+          exit 1
+        fi
+
+        echo "Backup complete. Archive path: ${ARCHIVE_PATH}"
+        printf "%s" "${ARCHIVE_PATH}" > $(results.app-archive-path.path)

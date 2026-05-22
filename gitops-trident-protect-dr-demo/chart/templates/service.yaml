@@ -1,0 +1,15 @@
+{{- if .Values.vm.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.vm.name }}-ssh
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: 22
+  selector:
+    app: {{ .Values.vm.app }}
+  type: ClusterIP
+{{- end }}
