@@ -114,7 +114,7 @@ function helm_param() {
   for p in "$@"; do
     params="${params} --parameter ${p}"
   done
-  if command -v argocd &>/dev/null; then
+  if command -v argocd &>/dev/null && argocd app get "${app}" -N "${ARGOCD_NS}" &>/dev/null; then
     argocd app set "${app}" ${params} -N "${ARGOCD_NS}" >/dev/null 2>&1
   else
     local json="["; local first=true
@@ -142,6 +142,7 @@ fi
 
 # Authenticate argocd CLI
 if command -v argocd &>/dev/null; then
+  oc config set-context --current --namespace="${ARGOCD_NS}" 2>/dev/null || true
   argocd login --core 2>/dev/null || true
 fi
 
@@ -316,7 +317,7 @@ pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} \
   -p blue.runStrategy=Always \
   -p green.runStrategy=Always \
   -p green.enabled=true \
-  -p green.sourceSnapshot=${SNAPSHOT} \
+  -p green.sourceSnapshot=\${SNAPSHOT} \
   -p green.sourceSnapshotNamespace=vm-prod \
   -p traffic.activeSlot=green"
 wait
@@ -326,7 +327,7 @@ pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} \
   -p blue.runStrategy=Always \
   -p green.runStrategy=Halted \
   -p green.enabled=true \
-  -p green.sourceSnapshot=${SNAPSHOT} \
+  -p green.sourceSnapshot=\${SNAPSHOT} \
   -p green.sourceSnapshotNamespace=vm-prod \
   -p traffic.activeSlot=blue"
 wait
@@ -371,7 +372,7 @@ wait
 
 SOURCE_UID=$(oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "STALE-UID")
 comment "Link the mirror relationship to the source Application's UID."
-pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=${SOURCE_UID}"
+pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=\${SOURCE_UID}"
 wait
 
 comment "Let's observe the standby mirror relationship state."
@@ -382,7 +383,7 @@ comment "In standby state, the target VM is powered down and the PVC is Read-Onl
 comment "Let's simulate a DR Failover entirely via GitOps! We promote the relationship to 'Promoted'."
 comment "ArgoCD syncs the Promotion. Trident Protect instantly promotes the storage to Read-Write,"
 comment "reconstructs the KubeVirt virtual machine manifests, and boots the VM."
-pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=${SOURCE_UID} -p trident.amr.desiredState=Promoted"
+pe "argocd app set trident-dr-mirror -N ${ARGOCD_NS} -p trident.amr.sourceAppUID=\${SOURCE_UID} -p trident.amr.desiredState=Promoted"
 wait
 
 comment "ArgoCD syncs the Promotion state. Let's watch the AMR state transition to Promoted..."
