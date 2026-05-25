@@ -202,7 +202,8 @@ clear
 # ==========================================
 act "2" "Tekton + Ansible — App v1.0 Deployment"
 
-comment "Let's check on our production VMs. Blue is up and Running, and Green is Stopped/Halted (zero compute costs)."
+comment "Let's check on our production VM. Blue is up and Running — the only VM deployed."
+comment "The Green VM is defined in Git (green.enabled=false), ready to be activated on upgrade."
 pe "oc get vm -n vm-prod"
 wait
 
@@ -222,6 +223,11 @@ wait
 
 comment "Trigger the install pipeline. Ansible will install httpd and serve v1.0 on the Blue VM."
 pe "oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n vm-prod"
+wait
+
+comment "Let's wait for the install to finish before we move on to the upgrade."
+pei "INSTALL_PR=\$(oc get pipelinerun -n vm-prod -l tekton.dev/pipeline=install-app --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')"
+pei "tkn pipelinerun logs \${INSTALL_PR} -n vm-prod -f"
 wait
 clear
 
@@ -280,6 +286,11 @@ wait
 
 comment "The EventListener auto-triggered the upgrade PipelineRun!"
 
+comment "Let's watch the upgrade pipeline as it clones the disk and deploys v2.0."
+pei "UPGRADE_PR=\$(oc get pipelinerun -n vm-prod -l tekton.dev/pipeline=upgrade-app --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')"
+pei "tkn pipelinerun logs \${UPGRADE_PR} -n vm-prod -f"
+wait
+
 comment "Let's check our VMs. Traffic has cut over: Green is Running (v2.0) and Blue is Stopped."
 pe "oc get vm -n vm-prod"
 wait
@@ -324,7 +335,7 @@ comment "Step 3: Clear all parameter overrides and let our authoritative Git bas
 pe "argocd app set trident-dr-prod -N ${ARGOCD_NS}"
 wait
 
-comment "Our VMs are returned perfectly to our Git baseline: Blue Running (v1.0), Green Stopped."
+comment "Our VMs are returned perfectly to our Git baseline: Blue Running, Green deleted (was never in the baseline)."
 pe "oc get vm -n vm-prod"
 wait
 clear
