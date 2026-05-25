@@ -46,6 +46,8 @@ function wait_for_pipeline_infra() {
     pipeline/trident-dr-pipeline
     pipeline/install-app
     pipeline/upgrade-app
+    eventlistener/trident-upgrade-trigger
+    route/trident-upgrade-trigger
   )
 
   echo "⏳ Waiting for ArgoCD-managed pipeline infrastructure in vm-prod..."
@@ -154,10 +156,43 @@ done
 echo "✅ App v1.0 successfully installed on Blue VM!"
 
 # Step 5: Upgrade to App v2.0 on Green VM via Blue Snapshot Clone
-echo "🚀 Step 5: Upgrading App to v2.0 on Green VM using Trident Snapshot clone..."
+echo "🚀 Step 5: Triggering App Upgrade to v2.0 via Simulated GitHub Webhook..."
 
-UPGRADE_PR=$(oc create -f "${DEMO_ROOT}/pipelines/upgrade-pipelinerun.yaml" -n vm-prod -o name)
-echo "   Upgrade PipelineRun created: ${UPGRADE_PR}"
+EL_ROUTE=$(oc get route trident-upgrade-trigger -n vm-prod -o jsonpath='{.spec.host}')
+echo "   EventListener Route: ${EL_ROUTE}"
+
+echo "   Sending mock GitHub push webhook payload..."
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" \
+  -d "{
+    \"ref\": \"refs/heads/main\",
+    \"commits\": [
+      {
+        \"id\": \"$(git -C ${DEMO_ROOT} rev-parse HEAD)\",
+        \"message\": \"bump app version to v2.0\",
+        \"modified\": [
+          \"gitops-trident-protect-dr-demo/pipelines/app-version.yaml\"
+        ]
+      }
+    ]
+  }" \
+  "http://${EL_ROUTE}" >/dev/null
+
+echo "⏳ Waiting for EventListener to trigger the Upgrade PipelineRun..."
+UPGRADE_PR=""
+for i in {1..15}; do
+  UPGRADE_PR_NAME=$(oc get pipelinerun -n vm-prod -l tekton.dev/pipeline=upgrade-app --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || true)
+  if [[ -n "${UPGRADE_PR_NAME}" ]]; then
+    UPGRADE_PR="pipelinerun.tekton.dev/${UPGRADE_PR_NAME}"
+    break
+  fi
+  sleep 2
+done
+if [[ -z "${UPGRADE_PR}" ]]; then
+  echo "❌ Error: EventListener did not trigger the Upgrade PipelineRun." >&2; exit 1
+fi
+echo "   Upgrade PipelineRun detected: ${UPGRADE_PR}"
 
 echo "⏳ Waiting for Upgrade PipelineRun to complete..."
 for i in {1..60}; do

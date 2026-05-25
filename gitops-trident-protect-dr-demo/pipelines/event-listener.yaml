@@ -1,0 +1,68 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: trident-upgrade-trigger
+  namespace: vm-prod
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: github-push-trigger
+      interceptors:
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: >
+                body.ref == 'refs/heads/main' &&
+                body.commits.exists(c,
+                  c.modified.exists(f, f == 'gitops-trident-protect-dr-demo/pipelines/app-version.yaml') ||
+                  c.added.exists(f, f == 'gitops-trident-protect-dr-demo/pipelines/app-version.yaml'))
+      bindings:
+        - ref: trident-upgrade-binding
+      template:
+        ref: trident-upgrade-template
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: trident-upgrade-binding
+  namespace: vm-prod
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.ssh_url)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: trident-upgrade-template
+  namespace: vm-prod
+spec:
+  params:
+    - name: git-repo-url
+      default: ""
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: upgrade-app-run-
+        namespace: vm-prod
+      spec:
+        pipelineRef:
+          name: upgrade-app
+        workspaces:
+          - name: ssh-key
+            secret:
+              secretName: vm-ssh-key
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: trident-upgrade-trigger
+  namespace: vm-prod
+spec:
+  to:
+    kind: Service
+    name: el-trident-upgrade-trigger
+  port:
+    targetPort: http-listener

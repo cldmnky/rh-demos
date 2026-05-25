@@ -13,7 +13,7 @@ blue:
   sourceSnapshotNamespace: openshift-virtualization-os-images
 
 green:
-  enabled: true
+  enabled: false
   name: centos-vm-green
   app: centos-vm-app
   runStrategy: Halted

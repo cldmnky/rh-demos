@@ -129,22 +129,18 @@ spec:
                     {\"name\":\"traffic.activeSlot\",\"value\":\"blue\"}
                   ]}}}}"
 
-              # Recreate green VM/PVC resources to ensure boot source from snapshot takes effect
-              oc delete vm centos-vm-green -n vm-prod --ignore-not-found --wait=false
-              oc delete datavolume centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
-              oc delete pvc centos-vm-green-disk -n vm-prod --ignore-not-found --wait=false
-
-              echo "Waiting for green VM to be fully deleted..."
-              DEADLINE=$(( $(date +%s) + 120 ))
-              until ! oc get vm centos-vm-green -n vm-prod >/dev/null 2>&1 && \
-                    ! oc get datavolume centos-vm-green-disk -n vm-prod >/dev/null 2>&1 && \
-                    ! oc get pvc centos-vm-green-disk -n vm-prod >/dev/null 2>&1; do
-                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green deletion" >&2; exit 1; }
+              # Wait for ArgoCD to declaratively create the green VM from the snapshot.
+              # Since green.enabled is false in the Git baseline, setting it to true
+              # triggers ArgoCD to provision the VM, DataVolume, and PVC for the first time.
+              echo "Waiting for ArgoCD to declaratively create centos-vm-green VM..."
+              DEADLINE=$(( $(date +%s) + 180 ))
+              until oc get vm centos-vm-green -n vm-prod >/dev/null 2>&1; do
+                [ "$(date +%s)" -gt "${DEADLINE}" ] && { echo "Timeout waiting for green VM creation" >&2; exit 1; }
                 echo -n '.'
                 sleep 3
               done
               echo ""
-              echo "Green VM and DataVolume fully deleted — ArgoCD will now recreate from snapshot"
+              echo "Green VM successfully created by ArgoCD from snapshot!"
       params:
         - name: volume-snapshot-name
           value: $(tasks.snapshot-blue.results.volume-snapshot-name)

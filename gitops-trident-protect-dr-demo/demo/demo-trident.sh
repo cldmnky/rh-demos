@@ -89,6 +89,8 @@ function wait_for_pipeline_infra() {
     pipeline/trident-dr-pipeline
     pipeline/install-app
     pipeline/upgrade-app
+    eventlistener/trident-upgrade-trigger
+    route/trident-upgrade-trigger
   )
 
   echo "Waiting for ArgoCD-managed pipeline infrastructure in ${NAMESPACE_PROD}..."
@@ -246,13 +248,35 @@ comment "to boot green from that snapshot -> run Ansible upgrade to v2.0 on gree
 pe "show_yaml ${DEMO_DIR}/pipelines/upgrade-pipeline.yaml"
 wait
 
-comment "The upgrade pipeline is already deployed by ArgoCD. Triggering the PipelineRun."
+comment "Instead of manually running a PipelineRun, we simulate the GitOps webhook."
+comment "When we pushed 'app-version.yaml' to Git, a real GitHub webhook would notify Tekton."
+comment "Let's simulate that push notification by curling our local EventListener Route!"
 wait
 
-comment "Triggering the upgrade. The green VM's disk is cloned from the live Blue storage snapshot."
-comment "This uses NetApp's native space-efficient storage cloning — instant and consuming zero extra blocks."
-pe "oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n vm-prod"
+comment "Resolving the EventListener Route URL..."
+pe "EL_ROUTE=\$(oc get route trident-upgrade-trigger -n vm-prod -o jsonpath='{.spec.host}')"
 wait
+
+comment "Simulating the GitHub push webhook payload..."
+pe "curl -s -X POST \
+  -H \"Content-Type: application/json\" \
+  -H \"X-GitHub-Event: push\" \
+  -d \"{
+    \\\"ref\\\": \\\"refs/heads/main\\\",
+    \\\"commits\\\": [
+      {
+        \\\"id\\\": \\\"\$(git rev-parse HEAD)\\\",
+        \\\"message\\\": \\\"bump app version to v2.0\\\",
+        \\\"modified\\\": [
+          \\\"gitops-trident-protect-dr-demo/pipelines/app-version.yaml\\\"
+        ]
+      }
+    ]
+  }\" \
+  \"http://\${EL_ROUTE}\""
+wait
+
+comment "The EventListener auto-triggered the upgrade PipelineRun!"
 
 comment "Let's check our VMs. Traffic has cut over: Green is Running (v2.0) and Blue is Stopped."
 pe "oc get vm -n vm-prod"

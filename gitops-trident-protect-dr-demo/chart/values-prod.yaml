@@ -4,7 +4,7 @@ blue:
   runStrategy: Always
 
 green:
-  enabled: true
+  enabled: false
   runStrategy: Halted
 
 traffic:
