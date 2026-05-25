@@ -269,7 +269,9 @@ pe "curl -s -X POST \
         \\\"message\\\": \\\"bump app version to v2.0\\\",
         \\\"modified\\\": [
           \\\"gitops-trident-protect-dr-demo/pipelines/app-version.yaml\\\"
-        ]
+        ],
+        \\\"added\\\": [],
+        \\\"removed\\\": []
       }
     ]
   }\" \
@@ -290,12 +292,32 @@ act "4" "GitOps Declarative Rollback"
 
 comment "If anything goes wrong, rolling back is declarative. No Git commits needed."
 comment "We use the 'argocd app set' command to update Helm parameters directly, and ArgoCD reconciles."
+
+# Resolve the active Green snapshot name from ArgoCD parameters to preserve it during rollback.
+# This prevents ArgoCD from immediately deleting the Green VM when we change runStrategies.
+SNAPSHOT=$(oc get application trident-dr-prod -n openshift-gitops -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.sourceSnapshot")].value}' 2>/dev/null || true)
+if [[ -z "${SNAPSHOT}" ]]; then
+  SNAPSHOT=$(oc get volumesnapshot -n vm-prod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+fi
+
 comment "Step 1: Spin up our Blue VM in the background (zero-downtime, traffic still on Green)."
-pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} -p blue.runStrategy=Always -p green.runStrategy=Always -p traffic.activeSlot=green"
+pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} \
+  -p blue.runStrategy=Always \
+  -p green.runStrategy=Always \
+  -p green.enabled=true \
+  -p green.sourceSnapshot=${SNAPSHOT} \
+  -p green.sourceSnapshotNamespace=vm-prod \
+  -p traffic.activeSlot=green"
 wait
 
 comment "Step 2: Shifting traffic back to Blue, and halting Green."
-pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} -p blue.runStrategy=Always -p green.runStrategy=Halted -p traffic.activeSlot=blue"
+pe "argocd app set trident-dr-prod -N ${ARGOCD_NS} \
+  -p blue.runStrategy=Always \
+  -p green.runStrategy=Halted \
+  -p green.enabled=true \
+  -p green.sourceSnapshot=${SNAPSHOT} \
+  -p green.sourceSnapshotNamespace=vm-prod \
+  -p traffic.activeSlot=blue"
 wait
 
 comment "Step 3: Clear all parameter overrides and let our authoritative Git baseline take back over."

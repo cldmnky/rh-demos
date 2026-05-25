@@ -173,7 +173,9 @@ curl -s -X POST \
         \"message\": \"bump app version to v2.0\",
         \"modified\": [
           \"gitops-trident-protect-dr-demo/pipelines/app-version.yaml\"
-        ]
+        ],
+        \"added\": [],
+        \"removed\": []
       }
     ]
   }" \
@@ -230,10 +232,22 @@ echo "✅ App v2.0 Blue/Green upgrade completed successfully!"
 
 # Step 6: Presenter-Driven Rollback to Blue
 echo "🔁 Step 6: Simulating presenter-driven manual rollback to Blue VM..."
+
+# Resolve the active Green snapshot name from ArgoCD parameters to preserve it during rollback.
+# Since we use oc patch fallback for helm_param, modifying some params would wipe out green.enabled and green.sourceSnapshot.
+SNAPSHOT=$(oc get application trident-dr-prod -n openshift-gitops -o jsonpath='{.spec.source.helm.parameters[?(@.name=="green.sourceSnapshot")].value}' 2>/dev/null || true)
+if [[ -z "${SNAPSHOT}" ]]; then
+  SNAPSHOT=$(oc get volumesnapshot -n vm-prod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+fi
+echo "   Active Green snapshot resolved for rollback: ${SNAPSHOT}"
+
 echo "   Step 6.1: Restarting Blue VM while traffic still flows to Green..."
 helm_param trident-dr-prod \
   "blue.runStrategy=Always" \
   "green.runStrategy=Always" \
+  "green.enabled=true" \
+  "green.sourceSnapshot=${SNAPSHOT}" \
+  "green.sourceSnapshotNamespace=vm-prod" \
   "traffic.activeSlot=green"
 
 echo "⏳ Waiting for Blue VM to return to Running state..."
@@ -248,6 +262,9 @@ echo "   Step 6.2: Redirecting traffic to Blue VM and halting Green VM..."
 helm_param trident-dr-prod \
   "blue.runStrategy=Always" \
   "green.runStrategy=Halted" \
+  "green.enabled=true" \
+  "green.sourceSnapshot=${SNAPSHOT}" \
+  "green.sourceSnapshotNamespace=vm-prod" \
   "traffic.activeSlot=blue"
 
 echo "⏳ Waiting for Green VM to be Halted..."

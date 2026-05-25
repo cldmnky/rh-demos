@@ -234,15 +234,26 @@ spec:
       runAfter:
         - smoke-test
       taskSpec:
+        params:
+          - name: volume-snapshot-name
+            type: string
         steps:
           - name: cutover
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set -eu
+              SNAPSHOT="$(params.volume-snapshot-name)"
               oc patch application.argoproj.io trident-dr-prod -n openshift-gitops --type=merge \
-                --patch "{\"spec\":{\"source\":{\"helm\":{\"parameters\":[
-                  {\"name\":\"blue.runStrategy\",\"value\":\"Halted\"},
-                  {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
-                  {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
-                ]}}}}"
+                --patch "{
+                  \"spec\":{\"source\":{\"helm\":{\"parameters\":[
+                    {\"name\":\"blue.runStrategy\",\"value\":\"Halted\"},
+                    {\"name\":\"green.runStrategy\",\"value\":\"Always\"},
+                    {\"name\":\"green.enabled\",\"value\":\"true\"},
+                    {\"name\":\"green.sourceSnapshot\",\"value\":\"${SNAPSHOT}\"},
+                    {\"name\":\"green.sourceSnapshotNamespace\",\"value\":\"vm-prod\"},
+                    {\"name\":\"traffic.activeSlot\",\"value\":\"green\"}
+                  ]}}}}"
+      params:
+        - name: volume-snapshot-name
+          value: $(tasks.snapshot-blue.results.volume-snapshot-name)
