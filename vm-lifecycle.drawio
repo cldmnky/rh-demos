@@ -1,0 +1,85 @@
+<mxfile host="Electron">
+  <diagram id="8FsBVinw-R7Y_ejyOuYf" name="Page-1">
+    <mxGraphModel dx="3893" dy="2404" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1280" pageHeight="720" background="#000000" math="0" shadow="0" adaptiveColors="auto">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="argo" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="ArgoCD Syncs&#xa;Prod App" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="vm_blue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Blue VM&#xa;Running" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="install" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Tekton Pipeline:&#xa;Ansible Installs&#xa;App v1.0" vertex="1">
+          <mxGeometry height="70" width="140" x="200" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="version_bump" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Git Push:&#xa;v1.0 → v2.0" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="webhook" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Webhook Triggers&#xa;Upgrade Pipeline" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="nQrNyZ1NeRJvdDCK64IJ-8" edge="1" parent="1" source="snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;fontSize=16;startSize=14;endArrow=open;endSize=14;sourcePerimeterSpacing=8;targetPerimeterSpacing=8;strokeColor=#FFFFFF;" target="clone">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="snapshot" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;verticalAlign=bottom;" value="Trident Snapshot&#xa;of Blue VM" vertex="1">
+          <mxGeometry height="70" width="190" x="170" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="nQrNyZ1NeRJvdDCK64IJ-9" edge="1" parent="1" source="clone" style="edgeStyle=none;curved=1;rounded=0;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;fontSize=16;startSize=14;endArrow=open;endSize=14;sourcePerimeterSpacing=8;targetPerimeterSpacing=8;strokeColor=#FFFFFF;" target="upgrade">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="clone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Clone Disk →&#xa;Green VM Boots" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="upgrade" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Ansible Upgrades&#xa;Green to v2.0" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="smoke" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Smoke Test&#xa;Green VM" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="traffic" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#3fb950;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Traffic Cut →&#xa;Green (v2.0)&#xa;Blue Stopped" vertex="1">
+          <mxGeometry height="70" width="140" x="540" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="rollback_decision" parent="1" style="rhombus;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Need&#xa;Rollback?" vertex="1">
+          <mxGeometry height="80" width="130" x="550" y="590" as="geometry" />
+        </mxCell>
+        <mxCell id="rollback" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="ArgoCD Param&#xa;Override:&#xa;Blue ← Traffic" vertex="1">
+          <mxGeometry height="60" width="150" x="770" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="done" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#3fb950;fontColor=#3fb950;fontStyle=1;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" value="Git Baseline&#xa;Restored" vertex="1">
+          <mxGeometry height="60" width="100" x="800" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="argo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="vm_blue">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="vm_blue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="install">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="install" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="version_bump">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="version_bump" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="webhook">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="webhook" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="snapshot">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="upgrade" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="smoke">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="smoke" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="traffic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="traffic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="rollback_decision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="rollback_decision" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#f0883e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;labelBackgroundColor=none;fontColor=#FF9A36;verticalAlign=bottom;" target="rollback" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="rollback" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3fb950;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="done">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
