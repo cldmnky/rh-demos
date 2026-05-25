@@ -278,14 +278,19 @@ done
 echo "   Step 6.3: Clearing ArgoCD parameter overrides to restore Git baseline..."
 helm_param trident-dr-prod
 
-echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline..."
-for i in {1..30}; do
-  BLUE_STRAT=$(oc get vm centos-vm-blue -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
-  GREEN_STRAT=$(oc get vm centos-vm-green -n vm-prod -o jsonpath='{.spec.runStrategy}' 2>/dev/null || true)
-  echo "   Blue: ${BLUE_STRAT}, Green: ${GREEN_STRAT}"
-  if [[ "${BLUE_STRAT}" == "Always" && "${GREEN_STRAT}" == "Halted" ]]; then break; fi
+echo "⏳ Waiting for ArgoCD to reconcile back to Git baseline (deleting Green VM & PVC)..."
+for i in {1..40}; do
+  VM_EXISTS=true; PVC_EXISTS=true
+  oc get vm centos-vm-green -n vm-prod >/dev/null 2>&1 || VM_EXISTS=false
+  oc get pvc centos-vm-green-disk -n vm-prod >/dev/null 2>&1 || PVC_EXISTS=false
+  echo "   VM exists: ${VM_EXISTS}, PVC exists: ${PVC_EXISTS}"
+  if [[ "${VM_EXISTS}" == "false" && "${PVC_EXISTS}" == "false" ]]; then
+    break
+  fi
   sleep 5
 done
+# Small grace period for Trident Application controller to update resource count
+sleep 10
 echo "✅ Manual rollback to Blue VM completed successfully!"
 
 # Step 7: SnapMirror Replication DR (Pattern A)
