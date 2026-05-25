@@ -9,7 +9,7 @@ echo "🧹 Cleaning up Trident Protect DR Demo resources..."
 
 # Delete ArgoCD Applications
 echo "→ Removing ArgoCD Applications..."
-oc delete application trident-dr-prod trident-dr-mirror -n "${ARGOCD_NS}" --ignore-not-found --timeout=30s 2>/dev/null || true
+oc delete application trident-dr-prod trident-dr-mirror trident-dr-infra -n "${ARGOCD_NS}" --ignore-not-found --timeout=30s 2>/dev/null || true
 
 # Delete cluster-level rolebindings
 echo "→ Removing cluster rolebindings..."

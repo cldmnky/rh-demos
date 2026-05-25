@@ -22,6 +22,8 @@ REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 DEMO_DIR="gitops-trident-protect-dr-demo"
 DEMO_ROOT="${REPO_ROOT}/${DEMO_DIR}"
 
+SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/rh-demos}"
+
 ########################
 # include the magic
 ########################
@@ -76,6 +78,31 @@ function show_yaml() {
   else
     cat "$file"
   fi
+}
+
+function wait_for_pipeline_infra() {
+  local resources=(
+    task/trident-protect-backup
+    task/trident-protect-restore
+    task/ansible-run-playbook
+    task/smoke-test
+    pipeline/trident-dr-pipeline
+    pipeline/install-app
+    pipeline/upgrade-app
+  )
+
+  echo "Waiting for ArgoCD-managed pipeline infrastructure in ${NAMESPACE_PROD}..."
+  for resource in "${resources[@]}"; do
+    local deadline=$(( $(date +%s) + 120 ))
+    until oc get "${resource}" -n "${NAMESPACE_PROD}" >/dev/null 2>&1; do
+      if [ "$(date +%s)" -gt "${deadline}" ]; then
+        echo "Timed out waiting for ${resource} in ${NAMESPACE_PROD}" >&2
+        return 1
+      fi
+      sleep 2
+    done
+    echo "  ${resource} is ready"
+  done
 }
 
 # helm_param: set ArgoCD Application Helm parameters via argocd CLI or oc patch fallback
@@ -150,14 +177,15 @@ wait
 
 comment "We deploy our production CentOS VM environment declaratively via ArgoCD."
 comment "ArgoCD will ensure our namespace, VMs, services, and Trident resources conform to Git."
+pe "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
 wait
 
-comment "While the VM boots, let's deploy our DR backup pipeline and grant necessary SAs."
-pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-backup.yaml -n vm-prod"
-pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/trident-protect-restore.yaml -n vm-prod"
-pei "oc apply -f ${DEMO_DIR}/pipelines/dr-pipeline.yaml -n vm-prod"
+comment "While the VM boots, let's deploy our pipeline infrastructure via ArgoCD and grant necessary SAs."
+pei "oc apply -f ${DEMO_DIR}/argocd/argocd-infra-app.yaml"
 pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
+pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
+pei "wait_for_pipeline_infra"
 wait
 
 comment "Now we trigger the DR pipeline. Under the hood, Trident Protect will communicate with KubeVirt"
@@ -189,15 +217,11 @@ comment "should be managed as code. We run an automated Tekton Pipeline which in
 pe "show_yaml ${DEMO_DIR}/pipelines/install-pipeline.yaml"
 wait
 
-comment "Applying the pipeline tasks, definitions, and RBAC to the cluster."
-pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/ansible-run-playbook.yaml -n vm-prod"
-pei "oc apply -f ${DEMO_DIR}/pipelines/tasks/smoke-test.yaml -n vm-prod"
-pei "oc apply -f ${DEMO_DIR}/pipelines/install-pipeline.yaml -n vm-prod"
-pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
+comment "All pipeline tasks and definitions are already deployed by ArgoCD via the infra Application. RBAC was granted in Act 1."
 wait
 
 comment "Trigger the install pipeline. Ansible will install httpd and serve v1.0 on the Blue VM."
-pe "tkn pipeline start install-app -n vm-prod --showlog"
+pe "oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n vm-prod"
 wait
 clear
 
@@ -224,13 +248,12 @@ comment "to boot green from that snapshot -> run Ansible upgrade to v2.0 on gree
 pe "show_yaml ${DEMO_DIR}/pipelines/upgrade-pipeline.yaml"
 wait
 
-comment "Applying and running the upgrade pipeline."
-pei "oc apply -f ${DEMO_DIR}/pipelines/upgrade-pipeline.yaml -n vm-prod"
+comment "The upgrade pipeline is already deployed by ArgoCD. Triggering the PipelineRun."
 wait
 
 comment "Triggering the upgrade. The green VM's disk is cloned from the live Blue storage snapshot."
 comment "This uses NetApp's native space-efficient storage cloning — instant and consuming zero extra blocks."
-pe "tkn pipeline start upgrade-app -n vm-prod --showlog"
+pe "oc create -f ${DEMO_DIR}/pipelines/upgrade-pipelinerun.yaml -n vm-prod"
 wait
 
 comment "Let's check our VMs. Traffic has cut over: Green is Running (v2.0) and Blue is Stopped."

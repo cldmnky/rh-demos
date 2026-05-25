@@ -37,6 +37,31 @@ function helm_param() {
   fi
 }
 
+function wait_for_pipeline_infra() {
+  local resources=(
+    task/trident-protect-backup
+    task/trident-protect-restore
+    task/ansible-run-playbook
+    task/smoke-test
+    pipeline/trident-dr-pipeline
+    pipeline/install-app
+    pipeline/upgrade-app
+  )
+
+  echo "⏳ Waiting for ArgoCD-managed pipeline infrastructure in vm-prod..."
+  for resource in "${resources[@]}"; do
+    local deadline=$(( $(date +%s) + 120 ))
+    until oc get "${resource}" -n vm-prod >/dev/null 2>&1; do
+      if [ "$(date +%s)" -gt "${deadline}" ]; then
+        echo "❌ Error: Timed out waiting for ${resource} in vm-prod" >&2
+        exit 1
+      fi
+      sleep 2
+    done
+    echo "   ${resource} is ready"
+  done
+}
+
 # Step 1: Force clean prior resources
 echo "🧹 Step 1: Performing pre-run cleanup..."
 "${DEMO_ROOT}/scripts/cleanup.sh"
@@ -85,10 +110,10 @@ echo "✅ Production VM Blue is successfully Running!"
 
 # Kick off S3 Backup/Restore pipeline EARLY — it runs in background (Kopia restore takes ~14 min)
 echo "☁️ Step 3.5: Firing S3 Backup/Restore DR pipeline (runs in background while we do lifecycle steps)..."
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-backup.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/trident-protect-restore.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/dr-pipeline.yaml" -n vm-prod
+oc apply -f "${DEMO_ROOT}/argocd/argocd-infra-app.yaml"
 oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f - || true
+oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
+wait_for_pipeline_infra
 
 DR_PR=$(cat <<EOF | oc create -f - -o name
 apiVersion: tekton.dev/v1
@@ -112,11 +137,6 @@ echo "   DR PipelineRun created: ${DR_PR}"
 
 # Step 4: Install App v1.0 on Blue VM via Tekton & Ansible
 echo "🤖 Step 4: Installing App v1.0 on Blue VM via Tekton & Ansible..."
-oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
-
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/ansible-run-playbook.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/tasks/smoke-test.yaml" -n vm-prod
-oc apply -f "${DEMO_ROOT}/pipelines/install-pipeline.yaml" -n vm-prod
 
 INSTALL_PR=$(oc create -f "${DEMO_ROOT}/pipelines/install-pipelinerun.yaml" -n vm-prod -o name)
 echo "   Install PipelineRun created: ${INSTALL_PR}"
@@ -137,7 +157,6 @@ echo "✅ App v1.0 successfully installed on Blue VM!"
 
 # Step 5: Upgrade to App v2.0 on Green VM via Blue Snapshot Clone
 echo "🚀 Step 5: Upgrading App to v2.0 on Green VM using Trident Snapshot clone..."
-oc apply -f "${DEMO_ROOT}/pipelines/upgrade-pipeline.yaml" -n vm-prod
 
 UPGRADE_PR=$(oc create -f "${DEMO_ROOT}/pipelines/upgrade-pipelinerun.yaml" -n vm-prod -o name)
 echo "   Upgrade PipelineRun created: ${UPGRADE_PR}"

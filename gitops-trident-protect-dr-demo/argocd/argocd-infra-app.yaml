@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trident-dr-infra
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/cldmnky/rh-demos
+    targetRevision: main
+    path: gitops-trident-protect-dr-demo/pipelines
+    directory:
+      exclude: '{install-pipelinerun.yaml,upgrade-pipelinerun.yaml,app-version.yaml}'
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vm-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
