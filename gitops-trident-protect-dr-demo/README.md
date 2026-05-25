@@ -59,7 +59,7 @@ To present this demo effectively, it is essential to understand the underlying d
 
 ## Architecture Overview
 
-![Architecture Overview](assets/architecture-overview.svg)
+![Architecture Overview](assets/architecture-overview.drawio.svg)
 
 > **AI Image Prompt:** "hand-drawn technical illustration in chalk-on-blackboard style, pure black background, monochrome white and grey ink only, no color — architecture overview of GitOps-driven disaster recovery with ArgoCD, Tekton, OpenShift Virtualization, and NetApp Trident Protect showing three namespace zones (vm-prod, vm-dr-mirror, vm-dr-backup) with VM Blue/Green, S3 AppVault, and SnapMirror AMR"
 
@@ -122,7 +122,7 @@ tkn pipeline start trident-dr-pipeline -n vm-prod \
 
 > **AI Image Prompt:** "hand-drawn chalk-on-blackboard sequence diagram, black background, white/grey chalk only, no color — Trident Protect → VM Guest ExecHook freeze/thaw → CSI Snapshot → Kopia streaming to AWS S3 AppVault with timeline annotations for Act 1 disaster recovery backup flow"
 
-![S3 Backup Data Flow](assets/act1-s3-backup-flow.svg)
+![S3 Backup Data Flow](assets/act1-s3-backup-flow.drawio.svg)
 
 > **AI Image Prompt:** "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink only, no color — Act 1 S3 backup and restore data flow: Production VM → Trident Protect ExecHook freeze → CSI Snapshot → Kopia encryption/dedup → AWS S3 AppVault → BackupRestore CR → restored VM in vm-dr-backup namespace, with timeline bar"
 
@@ -224,7 +224,13 @@ oc get vm -n vm-prod
 * **Console Moment (ArgoCD UI):** Open the ArgoCD UI dashboard. Point out the `trident-dr-prod` application. Show how the tree view maps the Helm resources, the VM objects, and the services.
 * **Visual Suggestion 2 (Traffic Cutover):** Show a diagram representing the Kubernetes service route changing its selector from `color: blue` to `color: green`.
 
-![Traffic Cutover Diagram](assets/act3-traffic-cutover.svg)
+![Traffic Cutover Diagram](assets/act3-blue-green-upgrade.drawio.svg)
+
+* **Visual Suggestion 3 (Event-Driven Trigger):** The upgrade PipelineRun is created automatically by a Tekton EventListener via a simulated GitHub webhook (no manual `tkn pipeline start`).
+
+![Event-Driven Trigger Flow](assets/event-driven-trigger.drawio.svg)
+
+> **AI Image Prompt:** "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink, no color — event-driven pipeline trigger flow showing Git repo → webhook → EventListener route → CEL interceptor → TriggerTemplate → PipelineRun auto-creation"
 
 > **AI Image Prompt:** "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink, no color — Blue/Green VM upgrade traffic cutover diagram showing active Blue→selects inactive, Green→selects active via Kubernetes LoadBalancer with Trident Protect CSI Snapshot cloning, phase 1 before, phase 2 snapshot+clone, phase 3 after cutover"
 
@@ -343,7 +349,7 @@ oc get vm -n vm-dr-mirror
 * **Console Moment (Trident Custom Resources):** Show the `AppMirrorRelationship` (AMR) resource in the OpenShift Custom Resource Definitions list. Highlight the transitions of the status fields from `Established` to `Promoting` to `Promoted`.
 * **Visual Suggestion 3 (Dual Sync Channels):** Use an architecture diagram explaining that there are two channels: NetApp ONTAP SnapMirror syncing raw blocks directly between storage systems, and AWS S3 storing the VM's Kubernetes configuration manifests.
 
-![SnapMirror Dual Channels](assets/act5-snapmirror-channels.svg)
+![SnapMirror Dual Channels](assets/act5-snapmirror-channels.drawio.svg)
 
 > **AI Image Prompt:** "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink, no color — SnapMirror AppMirrorRelationship dual-channel architecture: Channel 1 AWS S3 for Kubernetes metadata synchronization, Channel 2 ONTAP SnapMirror for async block-level volume replication, production to DR warm standby, failover promotion via ArgoCD GitOps"
 
@@ -407,11 +413,12 @@ See the [architecture overview](#architecture-overview) above for the full workf
 gitops-trident-protect-dr-demo/
 ├── README.md
 ├── assets/
-│   ├── architecture-overview.svg
-│   ├── act1-s3-backup-flow.svg
+│   ├── architecture-overview.drawio.svg
+│   ├── act1-s3-backup-flow.drawio.svg
 │   ├── act1-backup-sequence.svg
-│   ├── act3-traffic-cutover.svg
-│   └── act5-snapmirror-channels.svg
+│   ├── act3-blue-green-upgrade.drawio.svg
+│   ├── act5-snapmirror-channels.drawio.svg
+│   └── event-driven-trigger.drawio.svg
 ├── chart/
 │   ├── Chart.yaml
 │   ├── values.yaml

@@ -1,0 +1,67 @@
+<mxfile host="Electron">
+  <diagram id="52ebSKt_ukE1A6UkdkJp" name="Page-1">
+    <mxGraphModel dx="1523" dy="913" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1280" pageHeight="720" background="#000000" math="0" shadow="0" adaptiveColors="auto">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;fontColor=#c9d1d9;fontFamily=monospace;align=center;sketch=1;curveFitting=1;jiggle=2;" value="Act 1 — S3 Cloud Backup &amp; Restore (Pattern B)" vertex="1">
+          <mxGeometry height="30" width="800" x="40" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="step1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#3fb950;fontColor=#3fb950;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;1. Start DR PipelineRun&lt;/b&gt;&lt;br&gt;tkn pipeline start trident-dr-pipeline" vertex="1">
+          <mxGeometry height="55" width="220" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#58a6ff;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;2. Backup Task&lt;/b&gt;&lt;br&gt;oc delete backup (clean)&lt;br&gt;oc apply -f Backup CR" vertex="1">
+          <mxGeometry height="65" width="200" x="320" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#d2a8ff;fontColor=#d2a8ff;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;3. Trident Protect&lt;/b&gt;&lt;br&gt;ExecHook: freeze VM&lt;br&gt;CSI VolumeSnapshot&lt;br&gt;Kopia → S3 backup" vertex="1">
+          <mxGeometry height="75" width="240" x="40" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="step4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#58a6ff;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;4. Restore Task&lt;/b&gt;&lt;br&gt;oc apply -f BackupRestore&lt;br&gt;(namespace: vm-dr-backup)" vertex="1">
+          <mxGeometry height="65" width="200" x="320" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="step5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#d2a8ff;fontColor=#d2a8ff;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;5. Trident Protect&lt;/b&gt;&lt;br&gt;Kopia ← S3 restore&lt;br&gt;Recreate PVCs&lt;br&gt;Redeploy VM manifest" vertex="1">
+          <mxGeometry height="75" width="240" x="40" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="step6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#e3b341;fontColor=#e3b341;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;6. Restored VM Running&lt;/b&gt;&lt;br&gt;centos-vm-app-restored&lt;br&gt;vm-dr-backup namespace" vertex="1">
+          <mxGeometry height="65" width="200" x="320" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="s3-box" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#e3b341;fontColor=#e3b341;fontFamily=Architects Daughter;fontSize=11;fontStyle=1;sketch=1;curveFitting=1;jiggle=2;size=15;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;AWS S3 AppVault&lt;/b&gt;&lt;br&gt;lab-vault" vertex="1">
+          <mxGeometry height="90" width="200" x="580" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="vm-prod" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#58a6ff;fontFamily=Architects Daughter;fontSize=10;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="&lt;b&gt;CentOS VM (vm-prod)&lt;/b&gt;&lt;br&gt;KubeVirt PVCs + metadata" vertex="1">
+          <mxGeometry height="55" width="200" x="580" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="step1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#8b949e;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="step2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#8b949e;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="step3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#e3b341;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="s3-box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3b" edge="1" parent="1" source="step3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#e3b341;fontColor=#e3b341;fontFamily=Architects Daughter;fontSize=9;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="s3-box" value="Kopia backup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="step3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#8b949e;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="s3-box" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#e3b341;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5b" edge="1" parent="1" source="s3-box" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#e3b341;fontColor=#e3b341;fontFamily=Architects Daughter;fontSize=9;sketch=1;curveFitting=1;jiggle=2;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step5" value="Kopia restore">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="step4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#8b949e;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="step5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#8b949e;sketch=1;curveFitting=1;jiggle=2;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" target="step6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="timeline" parent="1" style="text;html=1;fontSize=10;fontColor=#8b949e;fontFamily=monospace;align=center;sketch=1;curveFitting=1;jiggle=2;fontStyle=2;" value="&lt;b&gt;~14 min background operation&lt;/b&gt;" vertex="1">
+          <mxGeometry height="25" width="800" x="40" y="390" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
