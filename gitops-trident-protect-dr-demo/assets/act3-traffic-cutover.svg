@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 580" width="900" height="580">
+  <defs>
+    <filter id="chalk">
+      <feTurbulence type="turbulence" baseFrequency="0.04" numOctaves="3" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.2" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#181818"/>
+    </linearGradient>
+    <marker id="arrowActive" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 Z" fill="#ddd"/>
+    </marker>
+    <marker id="arrowInactive" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 Z" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="580" fill="url(#bgGrad)" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="17" font-weight="bold" filter="url(#chalk)">Act 3 — Blue/Green Traffic Cutover (Trident Snapshot Clone)</text>
+  <line x1="150" y1="43" x2="750" y2="43" stroke="#555" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>
+
+  <!-- === PHASE 1: Before Cutover === -->
+  <text x="30" y="70" fill="#dfa" font-family="monospace" font-size="11" font-weight="bold" filter="url(#chalk)">PHASE 1 — Before Upgrade:</text>
+  <text x="30" y="85" fill="#999" font-family="monospace" font-size="9">Release  v1.0</text>
+
+  <!-- Service LB -->
+  <rect x="330" y="75" width="180" height="50" fill="none" stroke="#ddd" stroke-width="2" rx="5" filter="url(#chalk)"/>
+  <text x="420" y="90" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">⚡ Service LoadBalancer</text>
+  <text x="420" y="108" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">traffic.activeSlot: blue</text>
+
+  <!-- Traffic flow to Blue (active) -->
+  <line x1="420" y1="130" x2="270" y2="200" stroke="#ddd" stroke-width="3" marker-end="url(#arrowActive)"/>
+  <text x="330" y="160" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9" font-weight="bold">Traffic →</text>
+  <text x="330" y="174" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">selector: color=blue</text>
+
+  <!-- Traffic to Green (inactive) -->
+  <line x1="420" y1="125" x2="570" y2="200" stroke="#666" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="510" y="155" text-anchor="middle" fill="#666" font-family="monospace" font-size="8">X</text>
+
+  <!-- Blue VM (active) -->
+  <rect x="100" y="190" width="180" height="90" fill="none" stroke="#ddd" stroke-width="3" rx="6" filter="url(#chalk)"/>
+  <rect x="100" y="190" width="180" height="24" fill="#222" rx="6"/>
+  <text x="190" y="205" text-anchor="middle" fill="#8cf" font-family="monospace" font-size="11" font-weight="bold">🖥 CentOS VM Blue</text>
+  <text x="190" y="225" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="11" font-weight="bold">v1.0 — Running</text>
+  <text x="190" y="242" text-anchor="middle" fill="#999" font-family="monospace" font-size="9">Active · Serving Traffic</text>
+  <text x="190" y="260" text-anchor="middle" fill="#6af" font-family="monospace" font-size="9">label: color=blue</text>
+  <rect x="120" y="272" width="140" height="2" fill="#6af" fill-opacity="0.3"/>
+
+  <!-- Green VM (inactive) -->
+  <rect x="580" y="190" width="200" height="90" fill="none" stroke="#777" stroke-width="1.5" rx="6" filter="url(#chalk)"/>
+  <rect x="580" y="190" width="200" height="24" fill="#1a1a1a" rx="6"/>
+  <text x="680" y="205" text-anchor="middle" fill="#666" font-family="monospace" font-size="11">🖥 CentOS VM Green</text>
+  <text x="680" y="225" text-anchor="middle" fill="#666" font-family="monospace" font-size="11">Stopped / Halted</text>
+  <text x="680" y="242" text-anchor="middle" fill="#555" font-family="monospace" font-size="9">Zero Compute Cost</text>
+  <text x="680" y="260" text-anchor="middle" fill="#555" font-family="monospace" font-size="9">label: color=green</text>
+  <rect x="600" y="272" width="160" height="2" fill="#555" opacity="0.3"/>
+
+  <!-- === PHASE 2: Snapshot & Clone === -->
+  <text x="30" y="310" fill="#dfa" font-family="monospace" font-size="11" font-weight="bold" filter="url(#chalk)">PHASE 2 — Blue/Green Upgrade:</text>
+
+  <!-- Trident Snapshot -->
+  <rect x="100" y="330" width="280" height="60" fill="none" stroke="#aaa" stroke-width="2" rx="5" filter="url(#chalk)"/>
+  <text x="240" y="345" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">📸 Trident Protect CSI Snapshot</text>
+  <text x="240" y="360" text-anchor="middle" fill="#999" font-family="monospace" font-size="9">Instant snapshot of Blue VM's PVC (live, no downtime)</text>
+  <text x="240" y="375" text-anchor="middle" fill="#6af" font-family="monospace" font-size="9">Zero-overhead: NetApp space-efficient cloning</text>
+
+  <!-- Arrow: Blue -> Snapshot -->
+  <line x1="190" y1="285" x2="240" y2="335" stroke="#ccc" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowActive)"/>
+
+  <!-- Arrow: Snapshot -> Green -->
+  <line x1="380" y1="345" x2="680" y2="235" stroke="#ccc" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowActive)"/>
+  <text x="530" y="295" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9" font-weight="bold">Boot Green from Snapshot →</text>
+
+  <!-- === PHASE 3: After Cutover === -->
+  <text x="30" y="410" fill="#dfa" font-family="monospace" font-size="11" font-weight="bold" filter="url(#chalk)">PHASE 3 — After Cutover:</text>
+  <text x="30" y="425" fill="#999" font-family="monospace" font-size="9">Release  v2.0</text>
+
+  <!-- Service LB (new state) -->
+  <rect x="330" y="415" width="180" height="50" fill="none" stroke="#6af" stroke-width="2" rx="5" filter="url(#chalk)"/>
+  <text x="420" y="430" text-anchor="middle" fill="#6af" font-family="monospace" font-size="10" font-weight="bold">⚡ Service LoadBalancer</text>
+  <text x="420" y="448" text-anchor="middle" fill="#666" font-family="monospace" font-size="8">traffic.activeSlot: green</text>
+
+  <!-- Traffic to Blue (inactive) -->
+  <line x1="420" y1="465" x2="270" y2="530" stroke="#666" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="330" y="500" text-anchor="middle" fill="#666" font-family="monospace" font-size="8">X</text>
+
+  <!-- Traffic to Green (active) -->
+  <line x1="420" y1="470" x2="570" y2="530" stroke="#ddd" stroke-width="3" marker-end="url(#arrowActive)"/>
+  <text x="510" y="495" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9" font-weight="bold">← Traffic</text>
+  <text x="510" y="510" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">selector: color=green</text>
+
+  <!-- Blue VM (now inactive) -->
+  <rect x="100" y="520" width="180" height="0" rx="6" opacity="0"/>
+  <rect x="100" y="190" width="180" height="90" fill="none" stroke="#777" stroke-width="1.5" stroke-dasharray="6,3" rx="6" filter="url(#chalk)"/>
+  <rect x="100" y="190" width="180" height="24" fill="#1a1a1a" rx="6"/>
+  <text x="190" y="205" text-anchor="middle" fill="#666" font-family="monospace" font-size="11">🖥 CentOS VM Blue</text>
+  <text x="190" y="225" text-anchor="middle" fill="#666" font-family="monospace" font-size="11">Stopped / Halted</text>
+  <text x="190" y="242" text-anchor="middle" fill="#555" font-family="monospace" font-size="9">v1.0 Safely Preserved</text>
+  <text x="190" y="260" text-anchor="middle" fill="#555" font-family="monospace" font-size="9">label: color=blue</text>
+
+  <!-- Green VM (now active) -->
+  <rect x="580" y="520" width="200" height="0" rx="6" opacity="0"/>
+  <rect x="580" y="190" width="200" height="90" fill="none" stroke="#ddd" stroke-width="3" rx="6" filter="url(#chalk)"/>
+  <rect x="580" y="190" width="200" height="24" fill="#222" rx="6"/>
+  <text x="680" y="205" text-anchor="middle" fill="#8cf" font-family="monospace" font-size="11" font-weight="bold">🖥 CentOS VM Green</text>
+  <text x="680" y="225" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="11" font-weight="bold">v2.0 — Running</text>
+  <text x="680" y="242" text-anchor="middle" fill="#999" font-family="monospace" font-size="9">Active · Serving Traffic</text>
+  <text x="680" y="260" text-anchor="middle" fill="#6af" font-family="monospace" font-size="9">label: color=green</text>
+  <rect x="600" y="272" width="160" height="2" fill="#6af" fill-opacity="0.3"/>
+
+  <!-- === CUTOVER ANNOTATION === -->
+  <rect x="300" y="370" width="260" height="30" fill="#222" stroke="#6af" stroke-width="1" rx="4" filter="url(#chalk)"/>
+  <text x="430" y="383" text-anchor="middle" fill="#6af" font-family="monospace" font-size="10" font-weight="bold">▲ ZERO-DOWNTIME CUTOVER ▲</text>
+  <text x="430" y="395" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">Tekton pipeline: snapshot → clone → upgrade → verify → switch traffic</text>
+
+  <!-- Footer -->
+  <text x="450" y="565" text-anchor="middle" fill="#444" font-family="monospace" font-size="7" filter="url(#chalk)">AI Prompt: "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink, no color — Blue/Green VM upgrade traffic cutover diagram showing active Blue→selects inactive, Green→selects active via Kubernetes LoadBalancer with Trident Protect CSI Snapshot cloning, phase 1 before, phase 2 snapshot+clone, phase 3 after cutover"</text>
+</svg>

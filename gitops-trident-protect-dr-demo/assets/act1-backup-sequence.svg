@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" width="900" height="620">
+  <defs>
+    <filter id="chalk">
+      <feTurbulence type="turbulence" baseFrequency="0.04" numOctaves="3" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#181818"/>
+    </linearGradient>
+    <marker id="arrowFilled" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 Z" fill="#ccc"/>
+    </marker>
+    <marker id="arrowDashed" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 Z" fill="#888"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="620" fill="url(#bgGrad)" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="17" font-weight="bold" filter="url(#chalk)">Act 1 — S3 Backup Sequence Diagram</text>
+  <line x1="150" y1="43" x2="750" y2="43" stroke="#555" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>
+
+  <!-- Participant headers -->
+  <rect x="40" y="60" width="100" height="30" fill="#222" stroke="#aaa" stroke-width="1.5" rx="3"/>
+  <text x="90" y="78" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">Trident Protect</text>
+
+  <rect x="170" y="60" width="100" height="30" fill="#222" stroke="#aaa" stroke-width="1.5" rx="3"/>
+  <text x="220" y="78" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">VM Guest</text>
+
+  <rect x="300" y="60" width="100" height="30" fill="#222" stroke="#aaa" stroke-width="1.5" rx="3"/>
+  <text x="350" y="78" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">CSI Storage</text>
+
+  <rect x="430" y="60" width="100" height="30" fill="#222" stroke="#aaa" stroke-width="1.5" rx="3"/>
+  <text x="480" y="78" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">Kopia Engine</text>
+
+  <rect x="560" y="60" width="100" height="30" fill="#222" stroke="#aaa" stroke-width="1.5" rx="3"/>
+  <text x="610" y="78" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">AWS S3</text>
+
+  <!-- LIFELINES -->
+  <line x1="90" y1="90" x2="90" y2="580" stroke="#555" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="220" y1="90" x2="220" y2="580" stroke="#555" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="350" y1="90" x2="350" y2="580" stroke="#555" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="480" y1="90" x2="480" y2="580" stroke="#555" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="610" y1="90" x2="610" y2="580" stroke="#555" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- === MESSAGE 1: Freeze Hook === -->
+  <line x1="90" y1="110" x2="220" y2="130" stroke="#ccc" stroke-width="2.5" marker-end="url(#arrowFilled)"/>
+  <text x="155" y="113" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">① Execute Freeze Hook</text>
+  <text x="155" y="126" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">(quiesce guest filesystem)</text>
+
+  <!-- Note over VM -->
+  <rect x="200" y="150" width="140" height="28" fill="#222" stroke="#666" stroke-width="1" rx="3"/>
+  <text x="270" y="161" text-anchor="middle" fill="#dfa" font-family="monospace" font-size="8" font-weight="bold">✓ Filesystem locked</text>
+  <text x="270" y="172" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">app-consistent state</text>
+
+  <!-- === MESSAGE 2: Snapshot === -->
+  <line x1="90" y1="200" x2="350" y2="220" stroke="#ccc" stroke-width="2.5" marker-end="url(#arrowFilled)"/>
+  <text x="220" y="203" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">② Take CSI Storage Snapshot</text>
+
+  <!-- === MESSAGE 3: Thaw Hook === -->
+  <line x1="90" y1="260" x2="220" y2="280" stroke="#ccc" stroke-width="2.5" marker-end="url(#arrowFilled)"/>
+  <text x="155" y="263" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">③ Execute Thaw Hook</text>
+  <text x="155" y="276" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">(resume I/O operations)</text>
+
+  <!-- Note over VM (thaw) -->
+  <rect x="200" y="300" width="140" height="22" fill="#222" stroke="#666" stroke-width="1" rx="3"/>
+  <text x="270" y="310" text-anchor="middle" fill="#dfa" font-family="monospace" font-size="8" font-weight="bold">✓ VM resumes instantly</text>
+  <text x="270" y="318" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">downtime: ~0.1s</text>
+
+  <!-- === MESSAGE 4: Stream to Kopia === -->
+  <line x1="90" y1="350" x2="480" y2="370" stroke="#ccc" stroke-width="2.5" marker-end="url(#arrowFilled)"/>
+  <text x="285" y="353" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">④ Stream Snapshot blocks &amp; metadata</text>
+
+  <!-- === MESSAGE 5: Kopia -> S3 === -->
+  <line x1="480" y1="410" x2="610" y2="430" stroke="#ccc" stroke-width="2.5" marker-end="url(#arrowFilled)"/>
+  <text x="545" y="413" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">⑤ Upload encrypted, deduplicated blocks</text>
+
+  <!-- Note over S3 -->
+  <rect x="590" y="450" width="140" height="35" fill="#222" stroke="#666" stroke-width="1" rx="3"/>
+  <text x="660" y="461" text-anchor="middle" fill="#dfa" font-family="monospace" font-size="8" font-weight="bold">✓ 30GB stored in S3</text>
+  <text x="660" y="473" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">Kopia dedup + AES-GCM</text>
+  <text x="660" y="482" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">~14 min transfer</text>
+
+  <!-- === MESSAGE 6: BackupRestore === -->
+  <line x1="610" y1="510" x2="90" y2="530" stroke="#888" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
+  <text x="350" y="513" text-anchor="middle" fill="#aaa" font-family="monospace" font-size="9">⑥ BackupRestore reads S3 → reconstructs PVCs &amp; VM in vm-dr-backup</text>
+
+  <!-- Number annotations on left -->
+  <text x="18" y="110" fill="#6af" font-family="monospace" font-size="9" font-weight="bold">1</text>
+  <text x="18" y="200" fill="#6af" font-family="monospace" font-size="9" font-weight="bold">2</text>
+  <text x="18" y="260" fill="#6af" font-family="monospace" font-size="9" font-weight="bold">3</text>
+  <text x="18" y="350" fill="#6af" font-family="monospace" font-size="9" font-weight="bold">4</text>
+  <text x="18" y="510" fill="#6af" font-family="monospace" font-size="9" font-weight="bold">5</text>
+
+  <!-- Note: Trident self-snapshot -->
+  <rect x="70" y="395" width="350" height="22" fill="#222" stroke="#555" stroke-width="1" rx="3"/>
+  <text x="245" y="403" text-anchor="middle" fill="#888" font-family="monospace" font-size="7">Trident Protect: self-call to create Snapshot CR internally</text>
+
+  <text x="245" y="415" text-anchor="middle" fill="#888" font-family="monospace" font-size="7">(CSI VolumeSnapshot instant, space-efficient, zero copy)</text>
+
+  <!-- Footer -->
+  <text x="450" y="605" text-anchor="middle" fill="#444" font-family="monospace" font-size="7" filter="url(#chalk)">AI Prompt: "hand-drawn chalk-on-blackboard sequence diagram, black background, white/grey chalk only, no color — Trident Protect → VM Guest ExecHook freeze/thaw → CSI Snapshot → Kopia streaming to AWS S3 AppVault with timeline annotations for Act 1 disaster recovery backup flow"</text>
+</svg>

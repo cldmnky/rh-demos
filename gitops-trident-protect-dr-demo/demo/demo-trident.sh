@@ -46,7 +46,7 @@ if ! command -v redhatsay &>/dev/null; then
     if [ "$HAS_GUM" = true ]; then
       gum style --border="double" --border-foreground="196" --padding="1 2" --margin="1 1" --align="center" "$@"
     else
-      echo "=== $@ ==="
+      echo "=== $* ==="
     fi
   }
 fi

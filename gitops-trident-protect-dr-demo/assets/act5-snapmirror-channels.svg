@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 560" width="920" height="560">
+  <defs>
+    <filter id="chalk">
+      <feTurbulence type="turbulence" baseFrequency="0.04" numOctaves="3" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.2" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#161616"/>
+    </linearGradient>
+    <marker id="arrowW" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#ccc"/>
+    </marker>
+    <marker id="arrowG" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#999"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="560" fill="url(#bgGrad)" rx="8"/>
+
+  <!-- Title -->
+  <text x="460" y="30" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="17" font-weight="bold" filter="url(#chalk)">Act 5 — SnapMirror Replication DR (Pattern A) — Dual Sync Channels</text>
+  <line x1="120" y1="43" x2="800" y2="43" stroke="#555" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>
+
+  <!-- === PRODUCTION SITE === -->
+  <rect x="30" y="65" width="400" height="270" fill="none" stroke="#ddd" stroke-width="2" rx="6" filter="url(#chalk)"/>
+  <rect x="30" y="65" width="400" height="26" fill="#222" rx="6"/>
+  <text x="230" y="81" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="12" font-weight="bold">Production Site — vm-prod</text>
+
+  <!-- VM Config -->
+  <rect x="50" y="110" width="170" height="45" fill="none" stroke="#aaa" stroke-width="1.5" rx="4" filter="url(#chalk)"/>
+  <text x="135" y="125" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">📋 VM Config</text>
+  <text x="135" y="142" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">KubeVirt VM + Services</text>
+
+  <!-- Trident Application -->
+  <rect x="250" y="110" width="160" height="45" fill="none" stroke="#aaa" stroke-width="1.5" rx="4" filter="url(#chalk)"/>
+  <text x="330" y="125" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">🛡 Trident App</text>
+  <text x="330" y="142" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">centos-vm-app</text>
+
+  <!-- Active PVC -->
+  <rect x="90" y="185" width="280" height="60" fill="none" stroke="#ccc" stroke-width="2" rx="5" filter="url(#chalk)"/>
+  <rect x="90" y="185" width="280" height="22" fill="#222" rx="5"/>
+  <text x="230" y="199" text-anchor="middle" fill="#8cf" font-family="monospace" font-size="10" font-weight="bold">📦 Active PVC Volume (R/W)</text>
+  <text x="230" y="218" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">30GB iSCSI · Mounted to CentOS VM Blue</text>
+  <text x="230" y="235" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">NetApp ONTAP backend storage</text>
+
+  <!-- VM->Trident arrow -->
+  <line x1="220" y1="155" x2="260" y2="125" stroke="#aaa" stroke-width="1" marker-end="url(#arrowG)"/>
+
+  <!-- Trident->PVC arrow -->
+  <line x1="300" y1="155" x2="230" y2="198" stroke="#aaa" stroke-width="1" marker-end="url(#arrowG)"/>
+
+  <!-- === CHANNEL 1: Metadata via S3 === -->
+  <rect x="370" y="185" width="20" height="270" fill="#333" rx="2"/>
+  <text x="420" y="168" text-anchor="middle" fill="#dfa" font-family="monospace" font-size="10" font-weight="bold" filter="url(#chalk)">CHANNEL 1 — Metadata Sync (AWS S3)</text>
+  <line x1="420" y1="185" x2="420" y2="455" stroke="#888" stroke-width="2" stroke-dasharray="8,4"/>
+
+  <!-- VM Config -> S3 -->
+  <line x1="135" y1="155" x2="420" y2="200" stroke="#888" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowG)"/>
+  <text x="280" y="175" text-anchor="middle" fill="#888" font-family="monospace" font-size="7">VM Config</text>
+
+  <!-- Trident App -> S3 -->
+  <line x1="330" y1="155" x2="420" y2="230" stroke="#888" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowG)"/>
+  <text x="375" y="190" text-anchor="middle" fill="#888" font-family="monospace" font-size="7">K8s Metadata</text>
+
+  <!-- AWS S3 -->
+  <rect x="375" y="250" width="90" height="55" fill="none" stroke="#aaa" stroke-width="2" rx="4" filter="url(#chalk)"/>
+  <text x="420" y="268" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="9" font-weight="bold">☁ AWS S3</text>
+  <text x="420" y="283" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">AppVault</text>
+  <text x="420" y="295" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">lab-vault</text>
+
+  <!-- === CHANNEL 2: Blocks via SnapMirror === -->
+  <text x="480" y="168" text-anchor="middle" fill="#dfa" font-family="monospace" font-size="10" font-weight="bold" filter="url(#chalk)">CHANNEL 2 — Block Sync (ONTAP SnapMirror)</text>
+
+  <!-- Active PVC -> ONTAP SnapMirror connection -->
+  <line x1="370" y1="215" x2="500" y2="215" stroke="#ccc" stroke-width="3" marker-end="url(#arrowW)"/>
+  <line x1="500" y1="215" x2="500" y2="415" stroke="#ccc" stroke-width="3" marker-end="url(#arrowW)"/>
+  <rect x="460" y="280" width="80" height="24" fill="#222" stroke="#aaa" stroke-width="1" rx="3"/>
+  <text x="500" y="294" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="8" font-weight="bold">SnapMirror</text>
+  <text x="500" y="310" text-anchor="middle" fill="#999" font-family="monospace" font-size="7">Async Replication</text>
+  <text x="500" y="325" text-anchor="middle" fill="#6af" font-family="monospace" font-size="7" font-weight="bold">Sub-minute RPO</text>
+
+  <!-- === DR STANDBY SITE === -->
+  <rect x="520" y="65" width="380" height="270" fill="none" stroke="#ddd" stroke-width="2" rx="6" filter="url(#chalk)"/>
+  <rect x="520" y="65" width="380" height="26" fill="#222" rx="6"/>
+  <text x="710" y="81" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="12" font-weight="bold">DR Standby Site — vm-dr-mirror</text>
+
+  <!-- Trident AMR -->
+  <rect x="550" y="110" width="160" height="45" fill="none" stroke="#aaa" stroke-width="2" rx="4" filter="url(#chalk)"/>
+  <text x="630" y="125" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">⇄ AppMirrorRelationship</text>
+  <text x="630" y="142" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">vm-mirror-relationship</text>
+
+  <!-- Standby VM Config -->
+  <rect x="740" y="110" width="140" height="45" fill="none" stroke="#aaa" stroke-width="1.5" rx="4" filter="url(#chalk)"/>
+  <text x="810" y="125" text-anchor="middle" fill="#ddd" font-family="monospace" font-size="10" font-weight="bold">📋 Standby VM</text>
+  <text x="810" y="142" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">Powered Down</text>
+
+  <!-- Passive RO PVC -->
+  <rect x="570" y="185" width="300" height="60" fill="none" stroke="#ccc" stroke-width="2" rx="5" filter="url(#chalk)"/>
+  <rect x="570" y="185" width="300" height="22" fill="#222" rx="5"/>
+  <text x="720" y="199" text-anchor="middle" fill="#8cf" font-family="monospace" font-size="10" font-weight="bold">📦 Passive RO Volume (Read-Only)</text>
+  <text x="720" y="218" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">30GB iSCSI · Destination SnapMirror endpoint</text>
+  <text x="720" y="235" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">NetApp ONTAP backend (mounted RO)</text>
+
+  <!-- S3 -> AMR -->
+  <line x1="420" y1="305" x2="630" y2="142" stroke="#888" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowG)"/>
+  <text x="525" y="220" text-anchor="middle" fill="#888" font-family="monospace" font-size="7">K8s Metadata from S3</text>
+
+  <!-- S3 -> VM Config -->
+  <line x1="420" y1="305" x2="810" y2="142" stroke="#888" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowG)"/>
+
+  <!-- AMR -> Standby PVC -->
+  <line x1="630" y1="155" x2="720" y2="198" stroke="#aaa" stroke-width="1" marker-end="url(#arrowG)"/>
+
+  <!-- === PROMOTION BLOCK === -->
+  <rect x="250" y="370" width="420" height="55" fill="#222" stroke="#6af" stroke-width="1.5" rx="5" filter="url(#chalk)"/>
+  <text x="460" y="385" text-anchor="middle" fill="#6af" font-family="monospace" font-size="11" font-weight="bold">⚡ Failover: argocd app set trident-dr-mirror -p trident.amr.desiredState=Promoted</text>
+  <text x="460" y="400" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">→ Trident Protect promotes RO volume to R/W → reconstructs VM manifests → boots VM</text>
+  <text x="460" y="415" text-anchor="middle" fill="#999" font-family="monospace" font-size="8">Recovery time: seconds | RPO: sub-minute (async SnapMirror interval)</text>
+
+  <!-- arrow to promotion -->
+  <line x1="650" y1="340" x2="350" y2="385" stroke="#6af" stroke-width="1" stroke-dasharray="4,2"/>
+
+  <!-- === PROMOTED VM === -->
+  <rect x="250" y="450" width="420" height="55" fill="none" stroke="#ddd" stroke-width="2.5" rx="5" filter="url(#chalk)"/>
+  <rect x="250" y="450" width="420" height="22" fill="#222" rx="5"/>
+  <text x="460" y="465" text-anchor="middle" fill="#8cf" font-family="monospace" font-size="10" font-weight="bold">✓ Promoted VM Running in vm-dr-mirror</text>
+  <text x="460" y="482" text-anchor="middle" fill="#ccc" font-family="monospace" font-size="9">Read-Write PVC · CentOS VM Booted · Full Production Capability on DR Site</text>
+  <text x="460" y="497" text-anchor="middle" fill="#6af" font-family="monospace" font-size="8" font-weight="bold">Complete warm-standby DR failover, fully declarative via GitOps</text>
+
+  <!-- Footer -->
+  <text x="460" y="550" text-anchor="middle" fill="#444" font-family="monospace" font-size="7" filter="url(#chalk)">AI Prompt: "hand-drawn technical illustration chalk-on-blackboard style, black background, monochrome white and grey ink, no color — SnapMirror AppMirrorRelationship dual-channel architecture: Channel 1 AWS S3 for Kubernetes metadata synchronization, Channel 2 ONTAP SnapMirror for async block-level volume replication, production to DR warm standby, failover promotion via ArgoCD GitOps"</text>
+</svg>
