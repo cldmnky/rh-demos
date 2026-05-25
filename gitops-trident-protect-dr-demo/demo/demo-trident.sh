@@ -156,6 +156,9 @@ for ns in "vm-prod" "vm-dr-backup" "vm-dr-mirror"; do
     --dry-run=client -o yaml | oc apply -f - 2>/dev/null || true
 done
 
+# Reset app-version.yaml to a known baseline so the bump in Act 3 produces a real change
+ruby -0pi -e 'gsub(/version: "v[0-9.]+"/, "version: \"v1.0\"")' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/dev/null || true
+
 ########################
 # DEMO START
 ########################
@@ -245,7 +248,7 @@ wait
 
 comment "Let's commit and push the version bump to Git."
 pe "git add ${DEMO_DIR}/pipelines/app-version.yaml"
-pe "git commit --no-gpg-sign -m 'bump app version to v2.0'"
+pe "git commit --allow-empty --no-gpg-sign -m 'bump app version to v2.0'"
 pe "git push origin main"
 wait
 
