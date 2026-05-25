@@ -157,7 +157,7 @@ for ns in "vm-prod" "vm-dr-backup" "vm-dr-mirror"; do
 done
 
 # Reset app-version.yaml to a known baseline so the bump in Act 3 produces a real change
-ruby -0pi -e 'gsub(/version: "v[0-9.]+"/, "version: \"v1.0\"")' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/dev/null || true
+sed -i '' 's/v[0-9][0-9.]*/v1.0/' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/dev/null || true
 
 ########################
 # DEMO START
@@ -242,7 +242,7 @@ act "3" "Blue/Green Application Upgrade"
 
 comment "Time to deploy v2.0. We will edit Git, and Tekton will orchestrate a zero-downtime Blue/Green upgrade."
 comment "First, we bump the target app version in our Git repository."
-pe "ruby -0pi -e 'gsub(/version: \"v[0-9.]+\"/, \"version: \\\"v2.0\\\"\")' ${DEMO_DIR}/pipelines/app-version.yaml"
+pe "sed -i '' 's/v[0-9][0-9.]*/v2.0/' ${DEMO_DIR}/pipelines/app-version.yaml"
 pe "show_yaml ${DEMO_DIR}/pipelines/app-version.yaml"
 wait
 
