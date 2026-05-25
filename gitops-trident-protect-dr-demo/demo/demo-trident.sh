@@ -181,10 +181,8 @@ pe "oc create clusterrolebinding openshift-gitops-controller-admin-global --clus
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
 wait
 
-comment "While the VM boots, let's deploy our pipeline infrastructure via ArgoCD and grant necessary SAs."
+comment "While the VM boots, let's deploy our pipeline infrastructure via ArgoCD (RBAC included)."
 pei "oc apply -f ${DEMO_DIR}/argocd/argocd-infra-app.yaml"
-pei "oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f -"
-pei "oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f -"
 pei "wait_for_pipeline_infra"
 wait
 

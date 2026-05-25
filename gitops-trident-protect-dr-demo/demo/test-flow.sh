@@ -111,8 +111,6 @@ echo "✅ Production VM Blue is successfully Running!"
 # Kick off S3 Backup/Restore pipeline EARLY — it runs in background (Kopia restore takes ~14 min)
 echo "☁️ Step 3.5: Firing S3 Backup/Restore DR pipeline (runs in background while we do lifecycle steps)..."
 oc apply -f "${DEMO_ROOT}/argocd/argocd-infra-app.yaml"
-oc create clusterrolebinding pipeline-admin-vm-dr-backup --clusterrole=cluster-admin --serviceaccount=vm-dr-backup:pipeline --dry-run=client -o yaml | oc apply -f - || true
-oc create clusterrolebinding pipeline-admin-vm-prod --clusterrole=cluster-admin --serviceaccount=vm-prod:pipeline --dry-run=client -o yaml | oc apply -f - || true
 wait_for_pipeline_infra
 
 DR_PR=$(cat <<EOF | oc create -f - -o name
