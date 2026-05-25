@@ -351,7 +351,7 @@ act "5" "SnapMirror Replication DR (Pattern A)"
 
 comment "Now let's explore Pattern A: high-performance asynchronous replication via NetApp SnapMirror."
 comment "First, we create a Snapshot on the production side to seed the mirror relationship."
-pe "cat <<EOF | oc apply -f -
+pei "cat > /tmp/source-vm-snap.yaml <<'EOF'
 apiVersion: protect.trident.netapp.io/v1
 kind: Snapshot
 metadata:
@@ -361,6 +361,7 @@ spec:
   applicationRef: centos-vm-app
   appVaultRef: lab-vault
 EOF"
+pe "oc apply -f /tmp/source-vm-snap.yaml"
 wait
 
 comment "Let's watch our source snapshot reach Completed state."
