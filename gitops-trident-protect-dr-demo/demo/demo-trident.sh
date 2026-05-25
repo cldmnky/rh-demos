@@ -193,7 +193,7 @@ comment "and use an ExecHook to cleanly freeze the guest filesystem. Once frozen
 comment "storage snapshot, thaws the VM guest, and streams both volume blocks and Kubernetes metadata"
 comment "securely to our AWS S3 bucket (AppVault) using the secure Kopia deduplication data mover."
 comment "Once backed up, the pipeline submits a BackupRestore in vm-dr-backup namespace."
-pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup -s pipeline --showlog"
+pe "tkn pipeline start trident-dr-pipeline -n vm-prod -p application-name=centos-vm-app -p destination-namespace=vm-dr-backup -s pipeline"
 wait
 clear
 
