@@ -177,7 +177,7 @@ Disaster Recovery, App Mobility, and Blue/Green Upgrades"
 wait
 
 comment "Here is the high-level architecture overview."
-pe "show_image ${DEMO_ROOT}/assets/architecture-overview.png"
+show_image "${DEMO_ROOT}/assets/architecture-overview.png"
 wait
 
 # ==========================================
@@ -186,7 +186,7 @@ wait
 act "1" "S3 Cloud Backup & Restore (Pattern B)"
 
 comment "Here is the S3 Backup and Restore DR flow."
-pe "show_image ${DEMO_ROOT}/assets/backup-restore.png"
+show_image "${DEMO_ROOT}/assets/backup-restore.png"
 wait
 
 comment "We are going to deploy our production CentOS VM environment and fire off an"
@@ -224,7 +224,7 @@ clear
 act "2" "Tekton + Ansible — App v1.0 Deployment"
 
 comment "Here is the full VM lifecycle: deploy, install, upgrade, and rollback."
-pe "show_image ${DEMO_ROOT}/assets/vm-lifecycle.png"
+show_image "${DEMO_ROOT}/assets/vm-lifecycle.png"
 wait
 
 comment "Let's check on our production VM. Blue is up and Running — the only VM deployed."
@@ -371,7 +371,7 @@ clear
 act "5" "SnapMirror Replication DR (Pattern A)"
 
 comment "Here is the SnapMirror replication DR flow."
-pe "show_image ${DEMO_ROOT}/assets/snapmirror.png"
+show_image "${DEMO_ROOT}/assets/snapmirror.png"
 wait
 
 comment "Now let's explore Pattern A: high-performance asynchronous replication via NetApp SnapMirror."
