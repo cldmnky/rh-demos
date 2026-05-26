@@ -1,0 +1,45 @@
+<mxGraphModel adaptiveColors="auto">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    <mxCell id="snap" value="Create Source&#xa;Snapshot" style="shape=cylinder3;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="205" y="35" width="110" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="amr_deploy" value="ArgoCD Deploys&#xa;AMR to Mirror NS" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="180" y="160" width="160" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="link_uid" value="Link sourceAppUID&#xa;to Mirror App" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="180" y="280" width="160" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="standby" value="AMR in&#xa;Standby State" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="180" y="400" width="160" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="standby_detail" value="ONAP: Block-Level&#xa;Async Replication&#xa;PVC Read-Only / VM Stopped" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#8b949e;fontColor=#8b949e;fontFamily=monospace;dashed=1;" vertex="1" parent="1">
+      <mxGeometry x="540" y="385" width="180" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="failover" value="GitOps Failover:&#xa;Set desiredState=Promoted" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="180" y="520" width="160" height="60" as="geometry"/>
+    </mxCell>
+    <mxCell id="promote" value="Volume RW +&#xa;VM Boots in Mirror NS" style="ellipse;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#3fb950;fontColor=#3fb950;fontStyle=1;fontFamily=monospace;" vertex="1" parent="1">
+      <mxGeometry x="185" y="640" width="150" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="e1" edge="1" parent="1" source="snap" target="amr_deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e2" edge="1" parent="1" source="amr_deploy" target="link_uid" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e3" edge="1" parent="1" source="link_uid" target="standby" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e4" edge="1" parent="1" source="standby" target="standby_detail" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;dashed=1;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e5" edge="1" parent="1" source="standby" target="failover" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e6" edge="1" parent="1" source="failover" target="promote" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3fb950;">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+  </root>
+</mxGraphModel>

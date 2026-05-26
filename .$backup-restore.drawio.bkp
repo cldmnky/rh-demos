@@ -1,0 +1,55 @@
+<mxfile host="Electron">
+  <diagram id="DpDjr6D6WFU0SLQiTaH8" name="Page-1">
+    <mxGraphModel dx="1460" dy="902" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1280" pageHeight="720" background="#000000" math="0" shadow="0" adaptiveColors="auto">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="argo" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#f0883e;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="ArgoCD deploys&#xa;prod App" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="infra" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Pipeline Infra&#xa;Deployed" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="Lr-Num3JLqjhClSpmXbs-1" edge="1" parent="1" source="trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;sketch=1;hachureGap=4;jiggle=2;curveFitting=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;fontSize=16;startSize=14;endArrow=open;endSize=14;sourcePerimeterSpacing=8;targetPerimeterSpacing=8;strokeColor=#FFFFFF;" target="exec">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="trigger" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Trigger DR&#xa;Pipeline" vertex="1">
+          <mxGeometry height="60" width="140" x="200" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="exec" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="ExecHook:&#xa;Freeze VM FS" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="snap" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;verticalAlign=bottom;" value="Trident&#xa;Snapshot" vertex="1">
+          <mxGeometry height="70" width="110" x="555" y="155" as="geometry" />
+        </mxCell>
+        <mxCell id="kopia" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#58a6ff;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="Kopia Stream&#xa;to S3 AppVault" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="restore_cr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;sketch=1;curveFitting=1;jiggle=2;fillColor=#0d1117;strokeColor=#3fb950;fontColor=#c9d1d9;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;" value="BackupRestore&#xa;in vm-dr-backup" vertex="1">
+          <mxGeometry height="60" width="140" x="540" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="verify" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#3fb950;fontColor=#3fb950;fontStyle=1;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" value="VM Running&#xa;in vm-dr-backup" vertex="1">
+          <mxGeometry height="60" width="110" x="555" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="argo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="infra">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="infra" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="trigger">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="exec" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="snap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="snap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="kopia">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="kopia" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#8b949e;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="restore_cr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="restore_cr" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3fb950;fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;sketch=1;curveFitting=1;jiggle=2;" target="verify">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
