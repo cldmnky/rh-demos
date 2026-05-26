@@ -173,6 +173,7 @@ sed -i '' 's/v[0-9][0-9.]*/v1.0/' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/de
 ########################
 clear
 show_image "${DEMO_ROOT}/assets/intro.png"
+wait
 clear
 printf "Let´s look at how to use the built-in features in OpenShift and NetApp Trident Protect to \nmodernize your virtual machines." | redhatsay
 wait
