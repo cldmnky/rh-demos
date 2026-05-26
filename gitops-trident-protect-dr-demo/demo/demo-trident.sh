@@ -178,6 +178,9 @@ clear
 printf "Let´s look at how to use the built-in features in OpenShift and NetApp Trident Protect to \nmodernize your virtual machines." | redhatsay
 wait
 
+printf "Hello I'm Magnus Bengtsson\nSpecialist Solutions Architect, Red Hat." | redhatsay -v
+wait
+
 comment "Here is the high-level architecture overview."
 show_image "${DEMO_ROOT}/assets/architecture-overview.png"
 wait
