@@ -172,8 +172,7 @@ sed -i '' 's/v[0-9][0-9.]*/v1.0/' "${DEMO_DIR}/pipelines/app-version.yaml" 2>/de
 # DEMO START
 ########################
 clear
-redhatsay "Modern Virtualization: GitOps, Tekton, & NetApp Trident Protect
-Disaster Recovery, App Mobility, and Blue/Green Upgrades"
+printf "Let´s look at how to use the built-in features in OpenShift and NetApp Trident Protect to \nmodernize your virtual machines." | redhatsay
 wait
 
 comment "Here is the high-level architecture overview."
@@ -183,31 +182,26 @@ wait
 # ==========================================
 # ACT 1: Kick off S3 Backup & Restore DR (Pattern B)
 # ==========================================
-act "1" "S3 Cloud Backup & Restore (Pattern B)"
+act "1" "Using Trident Protect for Backup & Restore"
 
-comment "Here is the S3 Backup and Restore DR flow."
 show_image "${DEMO_ROOT}/assets/backup-restore.png"
 wait
 
 comment "We are going to deploy our production CentOS VM environment and fire off an"
 comment "on-demand offsite S3 backup and restore pipeline. Since Kopia block transfers"
 comment "take time, this will run in the background while we explore application lifecycles."
-wait
 
-comment "Let's inspect our production ArgoCD Application definition."
 pe "show_yaml ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
 wait
 
 comment "We deploy our production CentOS VM environment declaratively via ArgoCD."
 comment "ArgoCD will ensure our namespace, VMs, services, and Trident resources conform to Git."
-pe "oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f -"
+oc create clusterrolebinding openshift-gitops-controller-admin-global --clusterrole=cluster-admin --serviceaccount=openshift-gitops:openshift-gitops-argocd-application-controller --dry-run=client -o yaml | oc apply -f - 2>&1 >/dev/null
 pe "oc apply -f ${DEMO_DIR}/argocd/argocd-prod-app.yaml"
-wait
 
-comment "While the VM boots, let's deploy our pipeline infrastructure via ArgoCD (RBAC included)."
+comment "While the VM boots, let's deploy our pipeline infrastructure via ArgoCD."
 pei "oc apply -f ${DEMO_DIR}/argocd/argocd-infra-app.yaml"
 pei "wait_for_pipeline_infra"
-wait
 
 comment "Now we trigger the DR pipeline. Under the hood, Trident Protect will communicate with KubeVirt"
 comment "and use an ExecHook to cleanly freeze the guest filesystem. Once frozen, it takes an instant"
@@ -221,7 +215,7 @@ clear
 # ==========================================
 # ACT 2: Deploy App v1.0
 # ==========================================
-act "2" "Tekton + Ansible — App v1.0 Deployment"
+act "2" "Using Tekton + Ansible — For managing VM lifecycle as code"
 
 comment "Here is the full VM lifecycle: deploy, install, upgrade, and rollback."
 show_image "${DEMO_ROOT}/assets/vm-lifecycle.png"
@@ -230,21 +224,17 @@ wait
 comment "Let's check on our production VM. Blue is up and Running — the only VM deployed."
 comment "The Green VM is defined in Git (green.enabled=false), ready to be activated on upgrade."
 pe "oc get vm -n vm-prod"
-wait
 
 comment "Trident Protect is fully declarative. We have defined an 'Application' custom resource (centos-vm-app)."
 comment "This Application CR groups all namespace resources (VMs, DataVolumes, ConfigMaps, Secrets, Services)"
 comment "into a single logical application unit for unified, transactionally-safe protection."
 pe "oc get application.protect.trident.netapp.io centos-vm-app -n vm-prod -o yaml"
-wait
 
 comment "Instead of manually SSHing in and running ad-hoc shell commands, guest VM configuration"
 comment "should be managed as code. We run an automated Tekton Pipeline which invokes an Ansible playbook."
 pe "show_yaml ${DEMO_DIR}/pipelines/install-pipeline.yaml"
-wait
 
 comment "All pipeline tasks and definitions are already deployed by ArgoCD via the infra Application. RBAC was granted in Act 1."
-wait
 
 comment "Trigger the install pipeline. Ansible will install httpd and serve v1.0 on the Blue VM."
 pe "oc create -f ${DEMO_DIR}/pipelines/install-pipelinerun.yaml -n vm-prod"
@@ -376,7 +366,7 @@ wait
 
 comment "Now let's explore Pattern A: high-performance asynchronous replication via NetApp SnapMirror."
 comment "First, we create a Snapshot on the production side to seed the mirror relationship."
-pei "cat > /tmp/source-vm-snap.yaml <<'EOF'
+cat > /tmp/source-vm-snap.yaml <<'EOF'
 apiVersion: protect.trident.netapp.io/v1
 kind: Snapshot
 metadata:
@@ -385,7 +375,7 @@ metadata:
 spec:
   applicationRef: centos-vm-app
   appVaultRef: lab-vault
-EOF"
+EOF
 pe "oc apply -f /tmp/source-vm-snap.yaml"
 wait
 
