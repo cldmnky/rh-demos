@@ -577,7 +577,7 @@ fix_cni_version_and_system_pods() {
 edge_ip_on_kind() {
   local container="$1"
   podman inspect "${container}" \
-    --format '{{(index .NetworkSettings.Networks "kind" "IPAddress")}}' 2>/dev/null || echo ""
+    --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' 2>/dev/null || echo ""
 }
 
 # Write complete FRR config for an edge and restart FRR inside the container.
@@ -648,11 +648,11 @@ _configure_edges() {
   local c1_nodes=() c2_nodes=()
   local n ip
   for n in $(_kind_nodes "${CLUSTER1_NAME}"); do
-    ip=$(podman inspect "${n}" --format '{{(index .NetworkSettings.Networks "kind" "IPAddress")}}' 2>/dev/null || true)
+    ip=$(podman inspect "${n}" --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' 2>/dev/null || true)
     [[ -n "${ip}" && "${ip}" != "<no value>" ]] && c1_nodes+=("${ip}")
   done
   for n in $(_kind_nodes "${CLUSTER2_NAME}"); do
-    ip=$(podman inspect "${n}" --format '{{(index .NetworkSettings.Networks "kind" "IPAddress")}}' 2>/dev/null || true)
+    ip=$(podman inspect "${n}" --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' 2>/dev/null || true)
     [[ -n "${ip}" && "${ip}" != "<no value>" ]] && c2_nodes+=("${ip}")
   done
 
