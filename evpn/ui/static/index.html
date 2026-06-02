@@ -7,16 +7,47 @@
 <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="dark-theme">
 
 <header>
-  <span class="title">EVPN Multi-Cluster Stretched L2 Demo</span>
-  <span id="status" class="status-disconnected">connecting</span>
+  <div class="header-left">
+    <span class="title">EVPN Multi-Cluster Stretched L2 Demo</span>
+    <nav class="nav-tabs">
+      <button id="nav-btn-topo" class="nav-btn active" onclick="switchView('topo')">Topology</button>
+      <button id="nav-btn-diag" class="nav-btn" onclick="switchView('diag')">Diagnostics</button>
+    </nav>
+  </div>
+  <div class="header-right">
+    <button id="btn-theme" class="btn-theme" onclick="toggleTheme()">🌓 Theme</button>
+    <span id="status" class="status-disconnected">connecting</span>
+  </div>
 </header>
 
-<div class="main">
+<!-- Main Topology View -->
+<div id="topo-view" class="main">
   <div class="topology-panel">
     <div id="topology" class="topology-canvas"></div>
+    
+    <!-- Ping Panel (at bottom of canvas) -->
+    <div id="ping-panel" class="ping-panel collapsed">
+      <div class="ping-header" onclick="togglePingPanel()">
+        <span>⚡ Cross-Cluster Ping Runner</span>
+        <span id="ping-toggle-icon">▲</span>
+      </div>
+      <div class="ping-body">
+        <div class="ping-controls">
+          <label>From: 
+            <select id="ping-from"></select>
+          </label>
+          <label>To: 
+            <select id="ping-to"></select>
+          </label>
+          <button class="btn-ping" onclick="runPing()">Run Ping</button>
+          <button class="btn-ping-stop" onclick="stopPing()" disabled>Stop</button>
+        </div>
+        <pre id="ping-terminal" class="terminal-log">Select source/target and click 'Run Ping'...</pre>
+      </div>
+    </div>
   </div>
 
   <div class="side-panels">
@@ -26,7 +57,7 @@
         <span id="workload-count" class="count">0</span>
       </div>
       <div id="workload-list" class="list"></div>
-      <button class="btn-create" disabled title="Phase 2">+ Create Pod</button>
+      <button class="btn-create" onclick="toggleModal('create-modal', true)">+ Create Pod</button>
     </div>
 
     <div class="panel bgp-panel">
@@ -46,6 +77,85 @@
     </div>
   </div>
 </div>
+
+<!-- Diagnostics View -->
+<div id="diag-view" class="main diagnostics-view" style="display: none;">
+  <div class="diag-sidebar">
+    <button id="diag-btn-c1" class="diag-tab-btn active" onclick="switchDiagCluster('c1')">Cluster 1 (evpn-cluster1)</button>
+    <button id="diag-btn-c2" class="diag-tab-btn" onclick="switchDiagCluster('c2')">Cluster 2 (evpn-cluster2)</button>
+  </div>
+  <div class="diag-content">
+    <div class="diag-card">
+      <div class="diag-card-header">
+        <h3>OVN-K EVPN & frr-k8s Custom Resources Status</h3>
+        <button class="btn-refresh-diag" onclick="refreshDiag()">Refresh</button>
+      </div>
+      <pre id="diag-output" class="code-block">Loading resource diagnostics...</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Create Pod Modal -->
+<div id="create-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Deploy Workload Pod</h2>
+      <span class="close-btn" onclick="toggleModal('create-modal', false)">&times;</span>
+    </div>
+    <form id="create-pod-form" onsubmit="submitCreatePod(event)">
+      <div class="form-group">
+        <label for="pod-name">Pod Name</label>
+        <input type="text" id="pod-name" required placeholder="e.g. vm-c" pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$">
+      </div>
+      <div class="form-group">
+        <label>Target Cluster</label>
+        <div class="radio-group">
+          <label><input type="radio" name="pod-cluster" value="c1" checked> Cluster 1 (c1)</label>
+          <label><input type="radio" name="pod-cluster" value="c2"> Cluster 2 (c2)</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="pod-ip">Static CUDN IP (Optional)</label>
+        <input type="text" id="pod-ip" placeholder="e.g. 192.170.1.30">
+        <span class="help-text">Leave empty for auto-allocation (e.g. 192.170.1.x/24)</span>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-cancel" onclick="toggleModal('create-modal', false)">Cancel</button>
+        <button type="submit" class="btn-submit" id="btn-submit-pod">Deploy Pod</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Side Drawer -->
+<div id="side-drawer" class="drawer">
+  <div class="drawer-header">
+    <h2 id="drawer-title">Details</h2>
+    <span class="close-btn" onclick="toggleDrawer(false)">&times;</span>
+  </div>
+  <div class="drawer-content">
+    <div id="drawer-info" class="drawer-section"></div>
+    
+    <div class="drawer-tabs">
+      <button id="tab-btn-1" class="tab-btn active" onclick="switchDrawerTab(1)">Primary Data</button>
+      <button id="tab-btn-2" class="tab-btn" onclick="switchDrawerTab(2)">Secondary Data</button>
+      <button id="tab-btn-3" class="tab-btn" onclick="switchDrawerTab(3)">Interfaces</button>
+    </div>
+    
+    <div id="drawer-tab-content-1" class="tab-content active">
+      <pre id="drawer-fdb" class="code-block">loading...</pre>
+    </div>
+    <div id="drawer-tab-content-2" class="tab-content">
+      <pre id="drawer-neigh" class="code-block">loading...</pre>
+    </div>
+    <div id="drawer-tab-content-3" class="tab-content">
+      <pre id="drawer-devices" class="code-block">loading...</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Notifications -->
+<div id="toast" class="toast"></div>
 
 <script src="app.js"></script>
 <script src="topology.js"></script>

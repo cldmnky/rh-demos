@@ -61,8 +61,8 @@ func (d *dataplaneCollector) discoverDevices(ctx context.Context, nodeName strin
 	ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	out, err := podmanExec(ctx2, nodeName, "bash", "-c",
-		"ip -j link show type bridge 2>/dev/null; echo '---'; ip -j link show type vxlan 2>/dev/null")
+	out, err := ContainerExec(ctx2, nodeName, []string{"bash", "-c",
+		"ip -j link show type bridge 2>/dev/null; echo '---'; ip -j link show type vxlan 2>/dev/null"})
 	if err != nil {
 		log.Printf("dataplane %s: %v", nodeName, err)
 		return nil

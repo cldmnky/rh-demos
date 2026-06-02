@@ -97,7 +97,7 @@ func (p *podmanCollector) inspectState(ctx context.Context, name string) string 
 }
 
 func (p *podmanCollector) Exec(ctx context.Context, container string, cmd ...string) ([]byte, error) {
-	return containerExec(ctx, container, cmd)
+	return ContainerExec(ctx, container, cmd)
 }
 
 var _ = fmt.Sprintf // keep fmt import

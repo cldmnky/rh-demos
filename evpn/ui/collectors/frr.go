@@ -56,7 +56,7 @@ func (f *frrCollector) bgpSessions(ctx context.Context, edge string) []model.BGP
 	ctx2, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	out, err := containerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show bgp summary json"})
+	out, err := ContainerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show bgp summary json"})
 	if err != nil {
 		log.Printf("vtysh bgp summary %s: %v", edge, err)
 		return nil
@@ -102,7 +102,7 @@ func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model
 	ctx2, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	out, err := containerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show bgp l2vpn evpn json"})
+	out, err := ContainerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show bgp l2vpn evpn json"})
 	if err != nil {
 		log.Printf("vtysh bgp evpn %s: %v", edge, err)
 		return
@@ -181,7 +181,7 @@ func (f *frrCollector) evpnVNI(ctx context.Context, edge string) []model.VNI {
 	ctx2, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	out, err := containerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show evpn vni json"})
+	out, err := ContainerExecJSON(ctx2, edge, []string{"vtysh", "-c", "show evpn vni json"})
 	if err == nil {
 		var raw map[string]interface{}
 		if json.Unmarshal(out, &raw) == nil && len(raw) > 0 {

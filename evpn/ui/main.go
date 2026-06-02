@@ -92,6 +92,15 @@ func newServer(c *collectors.Collector, hub *sseHub, staticDir string) http.Hand
 		writeJSON(w, topo.Workloads)
 	})
 
+	mux.HandleFunc("POST /api/workloads", handleCreateWorkload)
+	mux.HandleFunc("DELETE /api/workloads/{cluster}/{name}", handleDeleteWorkload)
+	mux.HandleFunc("GET /api/ping", handlePingStream)
+	mux.HandleFunc("GET /api/nodes/{name}/fdb", handleNodeFDB)
+	mux.HandleFunc("GET /api/nodes/{name}/neigh", handleNodeNeigh)
+	mux.HandleFunc("GET /api/nodes/{name}/devices", handleNodeDevices)
+	mux.HandleFunc("GET /api/edges/{name}/routes", handleEdgeRoutes)
+	mux.HandleFunc("GET /api/cluster-resources/{cluster}", handleClusterResources)
+
 	mux.Handle("GET /", http.FileServer(http.Dir(staticDir)))
 
 	return logMiddleware(mux)

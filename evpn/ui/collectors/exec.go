@@ -29,7 +29,7 @@ func getClient() *http.Client {
 				MaxIdleConns:    10,
 				IdleConnTimeout: 30 * time.Second,
 			},
-			Timeout: 5 * time.Second,
+			Timeout: 0, // No timeout for streaming / long-running execs
 		}
 	})
 	return httpClient
@@ -111,7 +111,8 @@ type execStartRequest struct {
 	Tty    bool `json:"Tty"`
 }
 
-func containerExec(ctx context.Context, containerName string, cmd []string) ([]byte, error) {
+// ContainerExec executes a command on a container and returns stdout.
+func ContainerExec(ctx context.Context, containerName string, cmd []string) ([]byte, error) {
 	createBody, _ := json.Marshal(execCreateRequest{
 		Cmd:          cmd,
 		AttachStdout: true,
@@ -176,8 +177,9 @@ func demuxStream(reader io.Reader) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-func containerExecJSON(ctx context.Context, containerName string, cmd []string) ([]byte, error) {
-	out, err := containerExec(ctx, containerName, cmd)
+// ContainerExecJSON executes a command and parses its output as JSON (cleans FRR garbage first).
+func ContainerExecJSON(ctx context.Context, containerName string, cmd []string) ([]byte, error) {
+	out, err := ContainerExec(ctx, containerName, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -197,17 +199,110 @@ func stripToJSON(raw []byte) []byte {
 	return []byte(s[idx:])
 }
 
-func podmanExec(ctx context.Context, container string, args ...string) ([]byte, error) {
-	return containerExec(ctx, container, args)
+// ContainerExecStream executes a command and returns an io.ReadCloser streaming stdout.
+func ContainerExecStream(ctx context.Context, containerName string, cmd []string) (io.ReadCloser, error) {
+	createBody, _ := json.Marshal(execCreateRequest{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+
+	resp, err := podmanAPI(ctx, "POST", "/v1.47/containers/"+containerName+"/exec", bytes.NewReader(createBody))
+	if err != nil {
+		return nil, fmt.Errorf("exec create %s: %w", containerName, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("exec create %s: HTTP %d: %s", containerName, resp.StatusCode, body)
+	}
+
+	var execResp execCreateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&execResp); err != nil {
+		return nil, fmt.Errorf("exec create decode %s: %w", containerName, err)
+	}
+
+	startBody, _ := json.Marshal(execStartRequest{Detach: false, Tty: false})
+	resp2, err := podmanAPI(ctx, "POST", "/v1.47/exec/"+execResp.ID+"/start", bytes.NewReader(startBody))
+	if err != nil {
+		return nil, fmt.Errorf("exec start %s: %w", containerName, err)
+	}
+
+	// Return a custom ReadCloser that demuxes stream chunks on-the-fly!
+	return &demuxReader{
+		body:   resp2.Body,
+		header: make([]byte, 8),
+	}, nil
 }
 
-func kubectlExec(ctx context.Context, node, kubeconfig string, kubectlArgs ...string) ([]byte, error) {
+type demuxReader struct {
+	body   io.ReadCloser
+	header []byte
+	left   int
+}
+
+func (d *demuxReader) Read(p []byte) (n int, err error) {
+	if d.left > 0 {
+		toRead := d.left
+		if toRead > len(p) {
+			toRead = len(p)
+		}
+		n, err = d.body.Read(p[:toRead])
+		d.left -= n
+		return n, err
+	}
+
+	for {
+		_, err = io.ReadFull(d.body, d.header)
+		if err != nil {
+			return 0, err
+		}
+		size := int(d.header[4])<<24 | int(d.header[5])<<16 | int(d.header[6])<<8 | int(d.header[7])
+		if size == 0 {
+			continue
+		}
+		streamType := d.header[0]
+		if streamType == 1 { // stdout
+			d.left = size
+			toRead := d.left
+			if toRead > len(p) {
+				toRead = len(p)
+			}
+			n, err = d.body.Read(p[:toRead])
+			d.left -= n
+			return n, err
+		} else {
+			// skip stderr or other streams
+			discarded := 0
+			buf := make([]byte, 512)
+			for discarded < size {
+				chunk := size - discarded
+				if chunk > len(buf) {
+					chunk = len(buf)
+				}
+				rn, err2 := d.body.Read(buf[:chunk])
+				if err2 != nil {
+					return 0, err2
+				}
+				discarded += rn
+			}
+		}
+	}
+}
+
+func (d *demuxReader) Close() error {
+	return d.body.Close()
+}
+
+// KubectlExec runs a kubectl command on a kind control plane.
+func KubectlExec(ctx context.Context, node, kubeconfig string, kubectlArgs ...string) ([]byte, error) {
 	args := []string{"kubectl"}
 	if kubeconfig != "" {
 		args = append(args, "--kubeconfig="+kubeconfig)
 	}
 	args = append(args, kubectlArgs...)
-	return podmanExec(ctx, node, args...)
+	return ContainerExec(ctx, node, args)
 }
 
 func splitStr(s string, sep string) []string {

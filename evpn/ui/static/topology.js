@@ -1,15 +1,15 @@
-// EVPN UI — Topology Graph (vis-network)
+// EVPN UI — Topology Graph (vis-network) with Click Drilling and Groups
 
 let network = null;
 let topologyData = {nodes: new vis.DataSet(), edges: new vis.DataSet()};
 let initialized = false;
 const POSITIONS = {
   'evpn-cluster1-control-plane': {x: -350, y: -100},
-  'evpn-cluster1-worker':        {x: -250, y: -100},
-  'evpn-cluster2-control-plane': {x: 250, y: -100},
+  'evpn-cluster1-worker':        {x: -210, y: -100},
+  'evpn-cluster2-control-plane': {x: 210, y: -100},
   'evpn-cluster2-worker':        {x: 350, y: -100},
-  'evpn-edge1':                  {x: -300, y: 100},
-  'evpn-edge2':                  {x: 300, y: 100},
+  'evpn-edge1':                  {x: -280, y: 100},
+  'evpn-edge2':                  {x: 280, y: 100},
 };
 
 const COLORS = {
@@ -42,16 +42,31 @@ function initNetwork() {
       arrows: { to: { enabled: false } },
       color: { color: '#58a6ff55', highlight: '#58a6ff' },
       width: 2,
-      smooth: { type: 'curvedCW', roundness: 0.2 },
+      smooth: { type: 'curvedCW', roundness: 0.15 },
     },
   };
 
   network = new vis.Network(container, topologyData, options);
 
+  // Background Group Backdrops
   network.on("beforeDrawing", function (ctx) {
-    drawGroupBackdrop(ctx, -410, -170, 240, 120, "Cluster 1 (OVN-K)", COLORS.c1);
-    drawGroupBackdrop(ctx, 170, -170, 240, 120, "Cluster 2 (OVN-K)", COLORS.c2);
-    drawGroupBackdrop(ctx, -360, 40, 720, 120, "Provider Edge Core (BGP EVPN)", COLORS.edge);
+    drawGroupBackdrop(ctx, -410, -170, 260, 120, "Cluster 1 (East)", COLORS.c1);
+    drawGroupBackdrop(ctx, 150, -170, 260, 120, "Cluster 2 (West)", COLORS.c2);
+    drawGroupBackdrop(ctx, -340, 40, 680, 120, "Provider Edge Core (BGP EVPN)", COLORS.edge);
+  });
+
+  // Drill Down Click Listener
+  network.on("click", function (params) {
+    if (params.nodes.length > 0) {
+      const nodeId = params.nodes[0];
+      if (nodeId.startsWith("evpn-edge")) {
+        showEdgeDetails(nodeId);
+      } else {
+        showNodeDetails(nodeId);
+      }
+    } else {
+      toggleDrawer(false);
+    }
   });
 
   resizeObserver(container);
@@ -59,13 +74,13 @@ function initNetwork() {
 
 function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
   ctx.save();
-  ctx.fillStyle = color + '15'; // low opacity background (e.g. 8% opacity)
-  ctx.strokeStyle = color + '33'; // border (e.g. 20% opacity)
+  ctx.fillStyle = color + '0a'; // very low opacity background (e.g. 4% opacity)
+  ctx.strokeStyle = color + '22'; // dashed border (e.g. 13% opacity)
   ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]); // dashed border
+  ctx.setLineDash([4, 4]);
 
   // Draw rounded rect
-  const r = 8; // border radius
+  const r = 8;
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + width - r, y);
@@ -81,8 +96,8 @@ function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
   ctx.stroke();
 
   // Draw group label
-  ctx.setLineDash([]); // reset dashes for text
-  ctx.fillStyle = color + 'cc'; // high opacity text
+  ctx.setLineDash([]);
+  ctx.fillStyle = color + 'aa';
   ctx.font = 'bold 11px monospace';
   ctx.fillText(label.toUpperCase(), x + 12, y + 20);
   ctx.restore();
@@ -134,7 +149,7 @@ function updateGraph(topo) {
 
     const color = session.state === 'Up' || session.state === 'Established'
       ? '#3fb950' : (session.state === 'Active' ? '#d29922' : '#f85149');
-    const dashes = session.state !== 'Up';
+    const dashes = session.state !== 'Up' && session.state !== 'Established';
 
     edges.push({
       id: localNode + '-' + remoteNode,

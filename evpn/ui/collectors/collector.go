@@ -28,7 +28,7 @@ type Collector struct {
 func New(cfg Config) *Collector {
 	k8s := newK8sCollector(cfg)
 	k8s.setExec(func(ctx context.Context, cluster, node string, cmd ...string) ([]byte, error) {
-		return podmanExec(ctx, node, cmd...)
+		return ContainerExec(ctx, node, cmd)
 	})
 
 	return &Collector{
