@@ -90,74 +90,165 @@ and `advertise-all-vni`.
 ## Workloads on the Stretched Network
 
 Pods created in the `vm-workloads` namespace are automatically attached to
-the stretched L2 CUDN as their primary network. They can be assigned IPs
-from `192.170.1.0/24` and communicate directly across clusters.
+the stretched L2 CUDN as their primary network. OVN-K auto-assigns IPs from
+the CUDN subnet and FRR generates Type-2 EVPN routes, making the pod
+reachable across both clusters.
 
-```yaml
-# Example pod on Cluster1
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vm-1
-  namespace: vm-workloads
-  annotations:
-    k8s.ovn.org/pod-networks: |
-      {"default":{"ip_addresses":["192.170.1.10/24"],"role":"primary"}}
-spec:
-  containers:
-  - name: test
-    image: registry.k8s.io/e2e-test-images/agnhost:2.45
-    command: ["sleep", "infinity"]
-```
+### Deploy pods
 
-```yaml
-# Example pod on Cluster2
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vm-2
-  namespace: vm-workloads
-  annotations:
-    k8s.ovn.org/pod-networks: |
-      {"default":{"ip_addresses":["192.170.1.20/24"],"role":"primary"}}
-spec:
-  containers:
-  - name: test
-    image: registry.k8s.io/e2e-test-images/agnhost:2.45
-    command: ["sleep", "infinity"]
-```
-
-Verify cross-cluster connectivity:
 ```bash
-KUBECONFIG=kubeconfig.evpn-cluster1 kubectl exec -n vm-workloads vm-1 -- ping 192.170.1.20
+# Cluster1 — pod lands on cluster1-worker
+KUBECONFIG=kubeconfig.evpn-cluster1 kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vm-a
+  namespace: vm-workloads
+spec:
+  containers:
+  - name: netexec
+    image: registry.k8s.io/e2e-test-images/agnhost:2.45
+    command: ["sleep", "infinity"]
+  nodeSelector:
+    kubernetes.io/hostname: evpn-cluster1-worker
+EOF
+
+# Cluster2 — pod lands on cluster2-worker
+KUBECONFIG=kubeconfig.evpn-cluster2 kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vm-b
+  namespace: vm-workloads
+spec:
+  containers:
+  - name: netexec
+    image: registry.k8s.io/e2e-test-images/agnhost:2.45
+    command: ["sleep", "infinity"]
+  nodeSelector:
+    kubernetes.io/hostname: evpn-cluster2-worker
+EOF
 ```
+
+### Get CUDN IPs
+
+`kubectl get pods -o wide` shows the management IP only. The CUDN IP is in
+the pod annotation:
+
+```bash
+# vm-a CUDN IP
+KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get pod vm-a -n vm-workloads \
+  -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])"
+
+# vm-b CUDN IP
+KUBECONFIG=kubeconfig.evpn-cluster2 kubectl get pod vm-b -n vm-workloads \
+  -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])"
+```
+
+### Cross-cluster ping
+
+```bash
+# From vm-a (Cluster1) to vm-b (Cluster2) — travels over VXLAN via EVPN
+KUBECONFIG=kubeconfig.evpn-cluster1 kubectl exec vm-a -n vm-workloads -- \
+  ping 192.170.1.<vm-b-ip>
+
+# Verified: <2ms latency, 0% packet loss, ARP resolved via EVPN Type-2 routes
+```
+
+### Cross-cluster ARP
+
+```bash
+KUBECONFIG=kubeconfig.evpn-cluster1 kubectl exec vm-a -n vm-workloads -- arp -a
+# 192.170.1.<vm-b-ip> at 0a:58:c0:aa:01:xx [ether] on ovn-udn1
+```
+
+The remote pod's MAC is learned via EVPN Type-2 routes and the L2 SVI's
+neighbor table, appearing as a local ARP entry on the `ovn-udn1` interface.
+
+### IPAM across clusters
+
+OVN-K allocates CUDN IPs independently on each cluster. There is **no
+cross-cluster IPAM coordination** — two pods may receive the same IP if
+the allocation counters happen to align. This is an inherent characteristic
+of stretched L2 fabrics; the EVPN underlay provides connectivity but does
+not coordinate address assignment.
+
+**Production approaches** for unique IPs across clusters:
+
+- **`reservedSubnets`** — Carve out a range from auto-allocation on each
+  cluster's CUDN, leaving non-overlapping pools per cluster:
+  ```yaml
+  # Cluster1 CUDN — auto-allocate from 192.170.1.0/25
+  reservedSubnets: ["192.170.1.128/25"]
+  # Cluster2 CUDN — auto-allocate from 192.170.1.128/25
+  reservedSubnets: ["192.170.1.0/25"]
+  ```
+- **External DHCP** — Run a DHCP server on the stretched L2 segment (e.g.,
+  a pod or external container attached to the CUDN). Omit or reserve
+  subnets so OVN-K doesn't auto-allocate, and let DHCP handle all IPs.
+- **Static assignment** — Use OVN-K preconfigured UDN addresses
+  (`enablePreconfiguredUDNAddresses=true` + `v1.multus-cni.io/default-network`
+  annotation) to assign specific IPs per pod (requires feature gate).
 
 ## Debugging
 
-### Check EVPN resources
+### Pod level — find CUDN IP and verify ARP
+
+```bash
+# Get CUDN IP (not the kubectl get pods -o wide IP)
+kubectl get pod vm-a -n vm-workloads \
+  -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}'
+
+# ARP table — shows remote pod MAC learned via EVPN
+kubectl exec vm-a -n vm-workloads -- arp -a
+
+# Routes — verify CUDN interface is default
+kubectl exec vm-a -n vm-workloads -- ip route
+```
+
+### Cluster level — EVPN resources
+
 ```bash
 KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get vtep,cudn,routeadvertisements,frrconfiguration -A
 ```
 
 All resources should show `ACCEPTED: True`.
 
-### Check BGP sessions
+### Edge level — BGP and EVPN state
+
 ```bash
+# BGP session summary (all 6 sessions: 2 cluster nodes + peer edge)
 podman exec evpn-edge1 vtysh -c "show bgp summary"
+
+# L2VPN EVPN sessions and routes (Type-2 MAC/IP, Type-3 IMET)
+podman exec evpn-edge1 vtysh -c "show bgp l2vpn evpn summary"
 podman exec evpn-edge1 vtysh -c "show bgp l2vpn evpn"
+
+# EVPN VNI status (local + remote VTEPs)
 podman exec evpn-edge1 vtysh -c "show evpn vni"
 ```
 
-### Check data plane devices on a node
+### Node level — data plane devices
+
 ```bash
 podman exec evpn-cluster1-control-plane bash -c "
+  # SVD bridge
   ip link show type bridge | grep evbr
+  # VXLAN device (VNI 110)
   ip link show type vxlan | grep evx4
+  # VLAN-to-VNI mapping
   bridge vni show
+  # FDB entries (static per-pod + remote via EVPN)
+  bridge fdb show dev evbr-evpn-vtep
+  # L2 SVI with neighbor entries from EVPN Type-2 routes
+  ip neigh show dev svl2.1
 "
 ```
 
-### Check OVN-K pods
+### OVN-K pods
+
 ```bash
 KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get pods -n ovn-kubernetes -o wide
 KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get pods -n frr-k8s-system -o wide
