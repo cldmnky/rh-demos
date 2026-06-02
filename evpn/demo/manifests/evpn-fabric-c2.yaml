@@ -1,0 +1,52 @@
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: evpn-vtep
+spec:
+  mode: Unmanaged
+  cidrs:
+    - 10.89.0.0/16
+---
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: stretched-l2
+  labels:
+    evpn: enabled
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: vm-workloads
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets:
+        - 192.170.1.0/24
+      reservedSubnets:
+        - 192.170.1.0/25
+    transport: EVPN
+    evpn:
+      vtep: evpn-vtep
+      macVRF:
+        vni: 110
+        routeTarget: "64512:110"
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: evpn-ra
+spec:
+  targetVRF: auto
+  advertisements:
+    - PodNetwork
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+      evpn-peer: edge
+  networkSelectors:
+    - networkSelectionType: ClusterUserDefinedNetworks
+      clusterUserDefinedNetworkSelector:
+        networkSelector:
+          matchLabels:
+            evpn: enabled

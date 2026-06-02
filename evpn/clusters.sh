@@ -765,10 +765,10 @@ metadata:
 spec:
   bgp:
     routers:
-    - asn: \${BGP_AS}
+    - asn: ${BGP_AS}
       neighbors:
-      - address: \${peering_ip}
-        asn: \${BGP_AS}
+      - address: ${peering_ip}
+        asn: ${BGP_AS}
         port: 179
         disableMP: false
 EOF
@@ -948,6 +948,14 @@ cmd_status() {
 # ---------- Subcommands ----------
 
 cmd_create() {
+  local skip_evpn=0
+  local arg
+  for arg in "$@"; do
+    if [[ "${arg}" == "--skip-evpn" ]]; then
+      skip_evpn=1
+    fi
+  done
+
   check_deps full
   ensure_kind_network
   ensure_kernel_modules
@@ -973,12 +981,16 @@ cmd_create() {
   apply_bgp_for_cluster "${KUBECONFIG_C2}" "${CLUSTER2_NAME}" "${EDGE2_IP}"
 
   # Wire up the EVPN stretched L2 fabric (VTEP, CUDN, RouteAdvertisements)
-  create_evpn_namespace "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
-  create_evpn_namespace "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
-  apply_evpn_resources "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
-  apply_evpn_resources "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
-  wait_for_evpn_resources "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
-  wait_for_evpn_resources "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
+  if [[ "${skip_evpn}" -eq 0 ]]; then
+    create_evpn_namespace "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
+    create_evpn_namespace "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
+    apply_evpn_resources "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
+    apply_evpn_resources "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
+    wait_for_evpn_resources "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
+    wait_for_evpn_resources "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
+  else
+    _log "Skipping EVPN stretched fabric setup (per --skip-evpn option)."
+  fi
 
   _log "✅ Done. Kubeconfigs:"
   echo "  ${CLUSTER1_NAME}: ${KUBECONFIG_C1}"
