@@ -47,7 +47,45 @@ function initNetwork() {
   };
 
   network = new vis.Network(container, topologyData, options);
+
+  network.on("beforeDrawing", function (ctx) {
+    drawGroupBackdrop(ctx, -410, -170, 240, 120, "Cluster 1 (OVN-K)", COLORS.c1);
+    drawGroupBackdrop(ctx, 170, -170, 240, 120, "Cluster 2 (OVN-K)", COLORS.c2);
+    drawGroupBackdrop(ctx, -360, 40, 720, 120, "Provider Edge Core (BGP EVPN)", COLORS.edge);
+  });
+
   resizeObserver(container);
+}
+
+function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
+  ctx.save();
+  ctx.fillStyle = color + '15'; // low opacity background (e.g. 8% opacity)
+  ctx.strokeStyle = color + '33'; // border (e.g. 20% opacity)
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]); // dashed border
+
+  // Draw rounded rect
+  const r = 8; // border radius
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Draw group label
+  ctx.setLineDash([]); // reset dashes for text
+  ctx.fillStyle = color + 'cc'; // high opacity text
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText(label.toUpperCase(), x + 12, y + 20);
+  ctx.restore();
 }
 
 function updateGraph(topo) {

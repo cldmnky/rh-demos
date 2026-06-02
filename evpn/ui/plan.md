@@ -36,6 +36,7 @@ We have fully implemented, built, and end-to-end verified the MVP.
   - `frrCollector`: Execs `vtysh -c "show bgp summary json"` and `"show bgp l2vpn evpn json"` on the edges to parse session states, remote VTEPs, and route counts.
   - `dataplaneCollector`: Discovers local SVD devices (`evbr-vtep`, `evx4-vtep`) on nodes.
 - **Interactive Topology Canvas (`static/topology.js`)**: Leverages `vis-network` to draw real-time nodes (kind nodes, edge diamonds) and edges (BGP sessions colored green when Up/Established and dashed/orange when connecting).
+- **Architectural Isolation (Backdrops)**: Draws custom HTML5 canvas backdrops behind clusters and transit cores during the `beforeDrawing` callback. This partitions the canvas into labeled, dashed, color-coded domains (Cluster 1 (Blue), Cluster 2 (Purple), and Provider Edge Core (Orange)), making the stretch L2 boundary immediately clear to the audience.
 - **Responsive Panels**: Live inventory of Workloads (names, CUDN IPs, MACs, node hostname, state), BGP peers, and EVPN active routes.
 
 ---
