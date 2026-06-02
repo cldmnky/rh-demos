@@ -3,3 +3,4 @@ edge*_frr.conf
 edge*_daemons
 kind-evpn-cluster*.yaml
 kubeconfig.evpn-cluster*
+ui/evpn-ui

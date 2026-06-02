@@ -254,6 +254,32 @@ KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get pods -n ovn-kubernetes -o wide
 KUBECONFIG=kubeconfig.evpn-cluster1 kubectl get pods -n frr-k8s-system -o wide
 ```
 
+## Web UI
+
+A real-time visualization dashboard runs alongside the clusters.
+
+```bash
+# Build and start
+./evpn/clusters.sh ui build
+./evpn/clusters.sh ui start      # → http://localhost:8080
+
+# Manage
+./evpn/clusters.sh ui stop
+./evpn/clusters.sh ui status
+./evpn/clusters.sh ui logs
+```
+
+The UI shows:
+- **Topology graph** — kind nodes, edge containers, and live BGP session state
+- **Workload inventory** — all pods in `vm-workloads`, their CUDN IPs and MACs
+- **BGP sessions** — per-edge session summary with state and prefix counts
+- **EVPN state** — VNI details, route-targets, remote VTEP count
+
+All panels update in real time via Server-Sent Events (1 second refresh).
+
+For development details, see [`ui/README.md`](ui/README.md) and the
+full implementation plan at [`ui/plan.md`](ui/plan.md).
+
 ## Configuration Overrides
 
 | Variable | Default | Description |

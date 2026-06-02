@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVPN Multi-Cluster Stretched L2</title>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <span class="title">EVPN Multi-Cluster Stretched L2 Demo</span>
+  <span id="status" class="status-disconnected">connecting</span>
+</header>
+
+<div class="main">
+  <div class="topology-panel">
+    <div id="topology" class="topology-canvas"></div>
+  </div>
+
+  <div class="side-panels">
+    <div class="panel workloads-panel">
+      <div class="panel-header">
+        <h3>Workloads <span class="ns-label">vm-workloads</span></h3>
+        <span id="workload-count" class="count">0</span>
+      </div>
+      <div id="workload-list" class="list"></div>
+      <button class="btn-create" disabled title="Phase 2">+ Create Pod</button>
+    </div>
+
+    <div class="panel bgp-panel">
+      <div class="panel-header">
+        <h3>BGP Sessions</h3>
+        <span id="bgp-count" class="count">0</span>
+      </div>
+      <div id="bgp-list" class="list"></div>
+    </div>
+
+    <div class="panel evpn-panel">
+      <div class="panel-header">
+        <h3>EVPN</h3>
+        <span id="evpn-routes" class="count">0 routes</span>
+      </div>
+      <div id="evpn-list" class="list"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="topology.js"></script>
+</body>
+</html>

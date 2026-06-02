@@ -1029,6 +1029,82 @@ cmd_start() {
 
 cmd_help() {
   sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  echo
+  echo "  ui build     Build the evpn-ui container image"
+  echo "  ui start     Start the evpn-ui container (port 8080)"
+  echo "  ui stop      Stop the evpn-ui container"
+  echo "  ui status    Show UI container status and URL"
+  echo "  ui logs      Follow UI container logs"
+}
+
+# ---------- Web UI ----------
+
+UI_IMAGE="${UI_IMAGE:-evpn-ui:latest}"
+UI_CONTAINER="${UI_CONTAINER:-evpn-ui}"
+UI_PORT="${UI_PORT:-8080}"
+UI_DOCKERFILE="${SCRIPT_DIR}/ui/Dockerfile"
+
+cmd_ui() {
+  local ui_cmd="${1:-start}"
+  shift || true
+  case "${ui_cmd}" in
+    build)
+      _log "Building evpn-ui image..."
+      podman build -t "${UI_IMAGE}" -f "${UI_DOCKERFILE}" "${SCRIPT_DIR}/ui"
+      _log "✅ Image built: ${UI_IMAGE}"
+      ;;
+    start)
+      if podman container exists "${UI_CONTAINER}" 2>/dev/null; then
+        if [[ "$(podman inspect --format '{{.State.Status}}' "${UI_CONTAINER}" 2>/dev/null)" == "running" ]]; then
+          _log "UI container already running at http://localhost:${UI_PORT}"
+          return
+        fi
+        podman start "${UI_CONTAINER}" >/dev/null
+        _log "✅ UI started at http://localhost:${UI_PORT}"
+        return
+      fi
+      if ! podman image exists "${UI_IMAGE}" 2>/dev/null; then
+        _log "Image not found; building..."
+        podman build -t "${UI_IMAGE}" -f "${UI_DOCKERFILE}" "${SCRIPT_DIR}/ui"
+      fi
+      _log "Launching evpn-ui container..."
+      podman run -d --name "${UI_CONTAINER}" \
+        --network "${KIND_NETWORK}" \
+        --privileged \
+        -p "${UI_PORT}:8080" \
+        -v /var/run/docker.sock:/run/podman/podman.sock:rw \
+        "${UI_IMAGE}" \
+        --cluster1 "${CLUSTER1_NAME}" \
+        --cluster2 "${CLUSTER2_NAME}"
+      _log "✅ UI running at http://localhost:${UI_PORT}"
+      ;;
+    stop)
+      if podman container exists "${UI_CONTAINER}" 2>/dev/null; then
+        podman stop "${UI_CONTAINER}" >/dev/null 2>&1 || true
+        _log "UI container stopped."
+      else
+        _log "UI container not found."
+      fi
+      ;;
+    status)
+      if podman container exists "${UI_CONTAINER}" 2>/dev/null; then
+        local state
+        state=$(podman inspect --format '{{.State.Status}}' "${UI_CONTAINER}" 2>/dev/null)
+        echo "  UI container: ${UI_CONTAINER} (${state})"
+        if [[ "${state}" == "running" ]]; then
+          echo "  URL: http://localhost:${UI_PORT}"
+        fi
+      else
+        echo "  UI container: not created"
+      fi
+      ;;
+    logs)
+      podman logs -f "${UI_CONTAINER}" 2>/dev/null || _die "UI container not found. Run 'ui start' first."
+      ;;
+    *)
+      _die "Unknown ui subcommand: ${ui_cmd}. Try: build | start | stop | status | logs"
+      ;;
+  esac
 }
 
 # ---------- Main ----------
@@ -1042,8 +1118,9 @@ main() {
     stop)     cmd_stop "$@" ;;
     start)    cmd_start "$@" ;;
     status)   cmd_status "$@" ;;
+    ui)       cmd_ui "$@" ;;
     help|-h|--help) cmd_help ;;
-    *) _die "Unknown subcommand: ${cmd}. Try: create | destroy | start | stop | status | help" ;;
+    *) _die "Unknown subcommand: ${cmd}. Try: create | destroy | start | stop | status | ui | help" ;;
   esac
 }
 
