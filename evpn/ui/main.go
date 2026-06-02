@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -38,19 +37,25 @@ func main() {
 
 	go collector.Loop(ctx)
 
-	var mu sync.RWMutex
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
+		var lastGenerated time.Time
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				topo := collector.Snapshot()
-				mu.Lock()
+				if topo.GeneratedAt.Equal(lastGenerated) {
+					continue
+				}
+				lastGenerated = topo.GeneratedAt
 				hub.broadcast(topo)
-				mu.Unlock()
+				// Broadcast each route event as a separate SSE event
+				for _, re := range topo.RouteEvents {
+					hub.broadcastEvent("route_event", re)
+				}
 			}
 		}
 	}()
@@ -101,7 +106,13 @@ func newServer(c *collectors.Collector, hub *sseHub, staticDir string) http.Hand
 	mux.HandleFunc("GET /api/edges/{name}/routes", handleEdgeRoutes)
 	mux.HandleFunc("GET /api/cluster-resources/{cluster}", handleClusterResources)
 
-	mux.Handle("GET /", http.FileServer(http.Dir(staticDir)))
+	fs := http.FileServer(http.Dir(staticDir))
+	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		fs.ServeHTTP(w, r)
+	}))
 
 	return logMiddleware(mux)
 }

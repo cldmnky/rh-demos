@@ -2,6 +2,7 @@ package collectors
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -19,10 +20,13 @@ type Collector struct {
 	mu       sync.RWMutex
 	snapshot *model.Topology
 
-	podmanCollector     *podmanCollector
-	k8sCollector        *k8sCollector
-	frrCollector        *frrCollector
-	dataplaneCollector  *dataplaneCollector
+	seenWorkloads map[string]bool
+	ready         bool // becomes true after first collect cycle
+
+	podmanCollector    *podmanCollector
+	k8sCollector       *k8sCollector
+	frrCollector       *frrCollector
+	dataplaneCollector *dataplaneCollector
 }
 
 func New(cfg Config) *Collector {
@@ -33,6 +37,7 @@ func New(cfg Config) *Collector {
 
 	return &Collector{
 		cfg:                cfg,
+		seenWorkloads:      make(map[string]bool),
 		podmanCollector:    newPodmanCollector(cfg),
 		k8sCollector:       k8s,
 		frrCollector:       newFrrCollector(cfg),
@@ -78,6 +83,37 @@ func (c *Collector) collect(ctx context.Context) {
 	topo.BGP = c.frrCollector.collectBGP(ctx)
 	topo.EVPN = c.frrCollector.collectEVPN(ctx)
 	topo.Workloads = c.k8sCollector.collectWorkloads(ctx)
+
+	// Detect new workloads → generate route propagation events (skip first cycle)
+	currentWorkloads := make(map[string]bool)
+	var newestWorkload *model.Workload
+
+	for _, w := range topo.Workloads {
+		currentWorkloads[w.Name] = true
+		if c.ready && !c.seenWorkloads[w.Name] {
+			wCopy := w
+			newestWorkload = &wCopy
+		}
+	}
+
+	if newestWorkload != nil {
+		log.Printf("Route event: new workload %s on %s (cluster=%s)", newestWorkload.Name, newestWorkload.Node, newestWorkload.Cluster)
+		routeEvent := model.RouteEvent{
+			Type:    "type2",
+			VNI:     110,
+			Cluster: newestWorkload.Cluster,
+			Source:  newestWorkload.Node,
+		}
+		if newestWorkload.Cluster == "c1" {
+			routeEvent.Path = []string{newestWorkload.Node, "evpn-edge1", "evpn-edge2", "evpn-cluster2-worker"}
+		} else {
+			routeEvent.Path = []string{newestWorkload.Node, "evpn-edge2", "evpn-edge1", "evpn-cluster1-worker"}
+		}
+		topo.RouteEvents = append(topo.RouteEvents, routeEvent)
+	}
+
+	c.seenWorkloads = currentWorkloads
+	c.ready = true
 
 	if c.dataplaneCollector.HasData() {
 		topo = c.dataplaneCollector.mergeDevices(topo)

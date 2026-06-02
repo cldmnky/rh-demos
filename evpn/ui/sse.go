@@ -16,8 +16,13 @@ func jsonMarshal(v interface{}) ([]byte, error) {
 	return b, nil
 }
 
+type sseMessage struct {
+	event string
+	data  []byte
+}
+
 type sseClient struct {
-	ch   chan []byte
+	ch   chan sseMessage
 	done <-chan struct{}
 }
 
@@ -44,7 +49,7 @@ func (h *sseHub) subscribe(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	client := &sseClient{
-		ch:   make(chan []byte, 16),
+		ch:   make(chan sseMessage, 16),
 		done: r.Context().Done(),
 	}
 
@@ -65,8 +70,8 @@ func (h *sseHub) subscribe(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-client.done:
 			return
-		case payload := <-client.ch:
-			fmt.Fprintf(w, "event: topology\ndata: %s\n\n", payload)
+		case msg := <-client.ch:
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", msg.event, msg.data)
 			flusher.Flush()
 		}
 	}
@@ -78,13 +83,33 @@ func (h *sseHub) broadcast(topo interface{}) {
 		log.Printf("SSE marshal error: %v", err)
 		return
 	}
+	msg := sseMessage{event: "topology", data: payload}
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	for client := range h.clients {
 		select {
-		case client.ch <- payload:
+		case client.ch <- msg:
+		default:
+		}
+	}
+}
+
+func (h *sseHub) broadcastEvent(eventType string, data interface{}) {
+	payload, err := jsonMarshal(data)
+	if err != nil {
+		log.Printf("SSE marshal error: %v", err)
+		return
+	}
+	msg := sseMessage{event: eventType, data: payload}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients {
+		select {
+		case client.ch <- msg:
 		default:
 		}
 	}

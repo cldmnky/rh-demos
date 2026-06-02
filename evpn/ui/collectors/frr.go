@@ -87,12 +87,13 @@ func (f *frrCollector) bgpSessions(ctx context.Context, edge string) []model.BGP
 			peerType = "edge"
 		}
 		sessions = append(sessions, model.BGPSession{
-			Local:    edge,
-			Remote:   addr,
-			State:    peer.State,
-			Uptime:   peer.PeerUptime,
-			PfxRcd:   peer.PfxRcd,
-			PeerType: peerType,
+			Local:      edge,
+			Remote:     addr,
+			RemoteName: peer.Hostname,
+			State:      peer.State,
+			Uptime:     peer.PeerUptime,
+			PfxRcd:     peer.PfxRcd,
+			PeerType:   peerType,
 		})
 	}
 	return sessions

@@ -29,6 +29,15 @@ function listenSSE() {
       console.warn('parse error:', err);
     }
   });
+  evt.addEventListener('route_event', e => {
+    try {
+      const routeEvent = JSON.parse(e.data);
+      processRouteEvents([routeEvent]);
+      showToast(`New ${routeEvent.type === 'type2' ? 'MAC/IP' : 'IMET'} route propagated!`, 'info');
+    } catch (err) {
+      console.warn('route_event parse error:', err);
+    }
+  });
   evt.onerror = () => setStatus('disconnected');
 }
 
@@ -230,6 +239,36 @@ function deletePod(event, cluster, name) {
   });
 }
 
+function showWorkloadDetails(podName) {
+  currentDrawerID = podName;
+  toggleDrawer(true, `Workload: ${podName}`);
+
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) {
+    tabs.style.display = 'none';
+  }
+  switchDrawerTab(1);
+
+  const wl = currentTopology && currentTopology.workloads
+    ? currentTopology.workloads.find(w => w.name === podName)
+    : null;
+
+  document.getElementById('drawer-info').innerHTML = wl ? `
+    <p><strong>Pod:</strong> ${wl.name}</p>
+    <p><strong>Cluster:</strong> ${wl.cluster}</p>
+    <p><strong>Node:</strong> ${wl.node || '—'}</p>
+    <p><strong>CUDN IP:</strong> ${wl.cudn_ip || '—'}</p>
+    <p><strong>MAC:</strong> ${wl.mac || '—'}</p>
+    <p><strong>State:</strong> ${wl.state}</p>
+    <p><strong>Age:</strong> ${wl.age || '—'}</p>
+  ` : `
+    <p><strong>Pod:</strong> ${podName}</p>
+    <p><em>No detailed workload info available.</em></p>
+  `;
+
+  document.getElementById('drawer-fdb').textContent = 'Workload detail: no FDB or neighbor data.';
+}
+
 /* Side Drawer (Drill Down) */
 function toggleDrawer(show, title = 'Details') {
   const dr = document.getElementById('side-drawer');
@@ -247,7 +286,10 @@ function showNodeDetails(nodeName) {
   toggleDrawer(true, `${nodeName} Diagnostics`);
   
   // Show tabs, hide second/third tab contents, activate tab 1
-  document.querySelector('.drawer-tabs').style.display = 'flex';
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) {
+    tabs.style.display = 'flex';
+  }
   switchDrawerTab(1);
 
   document.getElementById('drawer-info').innerHTML = `
@@ -280,7 +322,10 @@ function showEdgeDetails(edgeName) {
   toggleDrawer(true, `${edgeName} Routing Table`);
 
   // Edges don't have SVD or local interfaces, so hide node-tabs 2 and 3
-  document.querySelector('.drawer-tabs').style.display = 'none';
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) {
+    tabs.style.display = 'none';
+  }
   switchDrawerTab(1);
 
   document.getElementById('drawer-info').innerHTML = `

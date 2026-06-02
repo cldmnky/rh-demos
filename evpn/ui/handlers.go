@@ -59,8 +59,9 @@ func handleCreateWorkload(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(cidr, "/") {
 			cidr = cidr + "/24"
 		}
-		// For primary UDN preconfigured IP assignment
-		pnAnn := fmt.Sprintf(`{"default":{"ip_addresses":["%s"]}}`, cidr)
+		// For primary CUDN preconfigured IP assignment
+		cudnKey := "vm-workloads/stretched-l2"
+		pnAnn := fmt.Sprintf(`{"%s":{"ip_addresses":["%s"]}}`, cudnKey, cidr)
 		overrides["metadata"] = map[string]interface{}{
 			"annotations": map[string]string{
 				"k8s.ovn.org/pod-networks": pnAnn,

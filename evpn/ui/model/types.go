@@ -8,7 +8,16 @@ type Topology struct {
 	Workloads   []Workload   `json:"workloads"`
 	BGP         []BGPSession `json:"bgp"`
 	EVPN        EVPNState    `json:"evpn"`
+	RouteEvents []RouteEvent `json:"route_events,omitempty"`
 	GeneratedAt time.Time    `json:"generated_at"`
+}
+
+type RouteEvent struct {
+	Type    string   `json:"type"`    // "type2" or "type3"
+	VNI     int      `json:"vni"`
+	Source  string   `json:"source"`  // originating node name
+	Cluster string   `json:"cluster"` // "c1" or "c2"
+	Path    []string `json:"path"`    // propagation hop sequence
 }
 
 type Cluster struct {
@@ -50,12 +59,13 @@ type Workload struct {
 }
 
 type BGPSession struct {
-	Local    string `json:"local"`
-	Remote   string `json:"remote"`
-	State    string `json:"state"`
-	Uptime   string `json:"uptime"`
-	PfxRcd   int    `json:"pfx_rcd"`
-	PeerType string `json:"peer_type"`
+	Local      string `json:"local"`
+	Remote     string `json:"remote"`
+	RemoteName string `json:"remote_name,omitempty"`
+	State      string `json:"state"`
+	Uptime     string `json:"uptime"`
+	PfxRcd     int    `json:"pfx_rcd"`
+	PeerType   string `json:"peer_type"`
 }
 
 type EVPNState struct {
