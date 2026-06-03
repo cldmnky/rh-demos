@@ -23,13 +23,27 @@ cd "${REPO_ROOT}"
 TYPE_SPEED=${TYPE_SPEED:-40}
 DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
 EVPN_DIR="evpn"
-KUBECONFIG_C1="${REPO_ROOT}/${EVPN_DIR}/kubeconfig.evpn-cluster1"
-KUBECONFIG_C2="${REPO_ROOT}/${EVPN_DIR}/kubeconfig.evpn-cluster2"
-MANIFESTS_DIR="${REPO_ROOT}/${EVPN_DIR}/demo/manifests"
+export KUBECONFIG_C1="${EVPN_DIR}/kubeconfig.evpn-cluster1"
+export KUBECONFIG_C2="${EVPN_DIR}/kubeconfig.evpn-cluster2"
+MANIFESTS_DIR="${EVPN_DIR}/demo/manifests"
 
 # Feature detection
 HAS_GUM=false && command -v gum &>/dev/null && HAS_GUM=true
 HAS_BAT=false && command -v bat &>/dev/null && HAS_BAT=true
+
+# Create temp kubectl wrappers so pe commands show short aliases instead of full kubeconfig paths
+TMP_KUBE_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_KUBE_DIR}"' EXIT
+cat > "${TMP_KUBE_DIR}/kubectl-c1" <<'WRAPPER'
+#!/usr/bin/env bash
+exec kubectl --kubeconfig="${KUBECONFIG_C1}" "$@"
+WRAPPER
+cat > "${TMP_KUBE_DIR}/kubectl-c2" <<'WRAPPER'
+#!/usr/bin/env bash
+exec kubectl --kubeconfig="${KUBECONFIG_C2}" "$@"
+WRAPPER
+chmod +x "${TMP_KUBE_DIR}/kubectl-c1" "${TMP_KUBE_DIR}/kubectl-c2"
+export PATH="${TMP_KUBE_DIR}:${PATH}"
 
 # Helper formatting
 function act() {
@@ -59,6 +73,14 @@ function comment() {
   fi
 }
 
+function show_manifest() {
+  if [ "$HAS_GUM" = true ]; then
+    cat "$1" | gum format -t code -l yaml
+  else
+    cat "$1"
+  fi
+}
+
 # Pre-flight Check: Ensure BGP infra is running
 if [[ ! -f "${KUBECONFIG_C1}" || ! -f "${KUBECONFIG_C2}" ]]; then
   echo -e "${RED}Error: Kubeconfigs not found. Run './evpn/clusters.sh create' first to stand up BGP infra.${COLOR_RESET}"
@@ -71,7 +93,6 @@ KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns vm-workloads --ignore-not-found 
 KUBECONFIG="${KUBECONFIG_C1}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
-wait
 
 # Wait for namespaces to be fully gone from both clusters (Kubernetes deletes them asynchronously)
 for kc in "${KUBECONFIG_C1}" "${KUBECONFIG_C2}"; do
@@ -110,16 +131,11 @@ act "1" "Configuring the Stretched L2 Segment"
 say "We begin by creating a standard Namespace with the primary UDN label on both clusters."
 wait
 
-if [ "$HAS_BAT" = true ]; then
-  pe "bat --style=plain --color=always --language=yaml ${MANIFESTS_DIR}/namespace.yaml"
-else
-  pe "cat ${MANIFESTS_DIR}/namespace.yaml"
-fi
-wait
+show_manifest "${MANIFESTS_DIR}/namespace.yaml"
 
 comment "Creating and labeling the namespaces simultaneously..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl apply -f ${MANIFESTS_DIR}/namespace.yaml"
-pe "KUBECONFIG=${KUBECONFIG_C2} kubectl apply -f ${MANIFESTS_DIR}/namespace.yaml"
+pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/namespace.yaml"
 wait
 clear
 
@@ -131,20 +147,15 @@ We use non-overlapping 'reservedSubnets' on each cluster's CUDN to prevent IP al
 This gives us beautiful, coordinated, non-overlapping IP address pools on the exact same Layer-2 stretched network!"
 wait
 
-if [ "$HAS_BAT" = true ]; then
-  pe "bat --style=plain --color=always --language=yaml ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
-else
-  pe "cat ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
-fi
-wait
+show_manifest "${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
 
 comment "Applying the fabric configurations to both clusters..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl apply -f ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
-pe "KUBECONFIG=${KUBECONFIG_C2} kubectl apply -f ${MANIFESTS_DIR}/evpn-fabric-c2.yaml"
+pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
+pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/evpn-fabric-c2.yaml"
 wait
 
 comment "Verifying acceptance of EVPN configurations on Cluster 1..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl get vtep,cudn,ra"
+pe "kubectl-c1 get vtep,cudn,ra"
 wait
 clear
 
@@ -161,8 +172,14 @@ comment "Checking BGP L2VPN EVPN session states on evpn-edge1..."
 pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn summary'"
 wait
 
-comment "Inspecting EVPN Type-3 (IMET) routes for multicast flooding..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route-type imet'"
+say "Now let's look at EVPN Type-3 (IMET — Inclusive Multicast Ethernet Tag) routes.
+These advertise which VTEPs belong to the same broadcast domain (VNI 110).
+Each worker node announces itself as an originator IP, forming the flooding list
+for BUM traffic (broadcast, unknown unicast, multicast) on the stretched segment."
+wait
+
+comment "Inspecting EVPN Type-3 (IMET — Inclusive Multicast Ethernet Tag) routes for multicast flooding..."
+pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type multicast'"
 wait
 clear
 
@@ -174,23 +191,17 @@ act "3" "Deploying Stretched Workloads"
 say "Let's deploy two workloads. They are placed in different clusters but attach to the same primary network segment."
 wait
 
-if [ "$HAS_BAT" = true ]; then
-  pe "bat --style=plain --color=always --language=yaml ${MANIFESTS_DIR}/pod-vm-a.yaml"
-  pe "bat --style=plain --color=always --language=yaml ${MANIFESTS_DIR}/pod-vm-b.yaml"
-else
-  pe "cat ${MANIFESTS_DIR}/pod-vm-a.yaml"
-  pe "cat ${MANIFESTS_DIR}/pod-vm-b.yaml"
-fi
-wait
+show_manifest "${MANIFESTS_DIR}/pod-vm-a.yaml"
+show_manifest "${MANIFESTS_DIR}/pod-vm-b.yaml"
 
 comment "Spawning VM-A (Cluster 1) and VM-B (Cluster 2)..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl apply -f ${MANIFESTS_DIR}/pod-vm-a.yaml"
-pe "KUBECONFIG=${KUBECONFIG_C2} kubectl apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
+pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/pod-vm-a.yaml"
+pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
 wait
 
 comment "Waiting for pods to reach Ready state..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl wait --for=condition=Ready pod vm-a -n vm-workloads --timeout=30s"
-pe "KUBECONFIG=${KUBECONFIG_C2} kubectl wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
+pe "kubectl-c1 wait --for=condition=Ready pod vm-a -n vm-workloads --timeout=30s"
+pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
 wait
 clear
 
@@ -198,10 +209,10 @@ say "Let's extract their assigned CUDN IP addresses. Notice how the IP pools are
 wait
 
 comment "Fetching VM-A CUDN IP (Cluster 1)..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
+pe "kubectl-c1 get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 
 comment "Fetching VM-B CUDN IP (Cluster 2)..."
-pe "KUBECONFIG=${KUBECONFIG_C2} kubectl get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
+pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 wait
 clear
 
@@ -210,20 +221,43 @@ clear
 # ==============================================================
 act "4" "Under the Hood: EVPN Type-2 Routes and Data Plane"
 
-say "As soon as the workloads spun up, OVN-K advertised their MAC + IP combinations.
-Let's verify that the edges and node kernel tables have learned the remote locations."
+say "As soon as the workloads spun up, OVN-K advertised their MAC + IP combinations
+into BGP EVPN as Type-2 (MAC/IP Advertisement) routes. Each entry shows:
+
+  [2]:[EthTag]:[MAClen]:[MAC]:[IPlen]:[IP]
+
+For example, '0a:58:c0:aa:01:04' is VM-B's MAC, and '192.170.1.4' is its IP —
+announced from Route Distinguisher 10.245.0.2:2 (a Cluster 2 node), with Next Hop
+10.89.0.40 (the Cluster 2 worker node IP on the overlay network).
+
+Let's verify the edge router has learned these routes."
 wait
 
 comment "Checking EVPN Type-2 (MAC/IP) routes on evpn-edge1..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route-type macip'"
+pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type macip'"
+wait
+
+say "Those Type-2 routes are installed as forwarding entries in the kernel.
+The Linux Bridge FDB on the Cluster 1 worker node tells us which MAC address
+lives behind which remote VTEP IP. A remote MAC learned via EVPN will show up
+here with the destination tunnel endpoint.
+
+Let's check — we're looking for VM-B's MAC mapped to the Cluster 2 worker IP."
 wait
 
 comment "Checking Linux Bridge FDB entries on the Cluster 1 worker node (where vm-b MAC maps to Cluster 2 worker IP)..."
 pe "podman exec evpn-cluster1-worker bridge fdb show dev evbr-evpn-vtep"
 wait
 
-comment "Checking local IP neighbor (ARP) table on Cluster 1 SVI interface..."
-pe "podman exec evpn-cluster1-worker ip neigh show dev svl2.1"
+say "And finally, the local ARP (neighbor) table on Cluster 1's SVI interface shows
+which IP addresses the local node has resolved on the stretched segment."
+wait
+
+# Resolve the SVI VLAN interface name (svl2.<vni>) — it varies per deployment
+SVI_DEV=$(podman exec evpn-cluster1-worker sh -c "ip -br link | awk -F'[@ ]' '/svl2\./{print \$1; exit}'")
+
+comment "Checking local IP neighbor (ARP) table on Cluster 1 SVI interface (${SVI_DEV})..."
+pe "podman exec evpn-cluster1-worker ip neigh show dev ${SVI_DEV}"
 wait
 clear
 
@@ -240,11 +274,11 @@ VM_B_IP_FULL=$(KUBECONFIG=${KUBECONFIG_C2} kubectl get pod vm-b -n vm-workloads 
 VM_B_IP=$(echo "${VM_B_IP_FULL}" | cut -d'/' -f1)
 
 comment "Pinging VM-B (${VM_B_IP}) from inside VM-A..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl exec vm-a -n vm-workloads -- ping -c 4 ${VM_B_IP}"
+pe "kubectl-c1 exec vm-a -n vm-workloads -- ping -c 4 ${VM_B_IP}"
 wait
 
 comment "Checking the pod ARP table inside VM-A..."
-pe "KUBECONFIG=${KUBECONFIG_C1} kubectl exec vm-a -n vm-workloads -- arp -a"
+pe "kubectl-c1 exec vm-a -n vm-workloads -- arp -a"
 wait
 clear
 
