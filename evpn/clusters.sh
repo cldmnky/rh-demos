@@ -23,7 +23,8 @@
 #   ├── edge1_frr.conf
 #   ├── edge1_daemons
 #   ├── edge2_frr.conf
-#   └── edge2_daemons
+#   ├── edge2_daemons
+#   └── edge_vtysh.conf
 #
 # Notes:
 # - Each cluster is named <NAME_PREFIX>1 / <NAME_PREFIX>2 and both share a single
@@ -689,6 +690,7 @@ CONF
     podman run -d --name "${ctr}" --network "${KIND_NETWORK}" --ip "${edge_ip}" --privileged \
       -v "${SCRIPT_DIR}/${name}_frr.conf:/etc/frr/frr.conf" \
       -v "${SCRIPT_DIR}/${name}_daemons:/etc/frr/daemons" \
+      -v "${SCRIPT_DIR}/edge_vtysh.conf:/etc/frr/vtysh.conf" \
       "${FRR_IMAGE}" >/dev/null
   done
   _configure_edges
