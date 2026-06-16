@@ -283,6 +283,30 @@ Use this structure for larger demos:
 5. Rollback or cleanup story.
 6. Closing comparison or takeaway slide.
 
+### Pattern J: Standard Shared Helpers Library (`scripts/helpers.sh`)
+
+To avoid duplicating boilerplate code across demo scripts, use the shared helper library located at `scripts/helpers.sh`. This library detects available tools (e.g. `gum`, `bat`, `redhatsay`) and provides standardized presentation functions.
+
+Additionally, **it overrides the standard `wait` function** from `demo-magic.sh` to check for `$NO_WAIT`. This is critical because it ensures that when scripts are run in headless/automated test environments (with `-n` or `NO_WAIT=true`), the explicit `wait` calls do not block.
+
+#### How to use it
+
+Import the helpers library immediately after importing `demo-magic.sh`:
+
+```bash
+. "$REPO_ROOT/scripts/demo-magic.sh"
+. "$REPO_ROOT/scripts/helpers.sh"
+```
+
+#### Shared Functions Provided
+
+- **`act "num" "title"`**: Displays a bold, dual-bordered yellow block via `gum style` (or standard yellow text as fallback) representing a distinct act or phase of the presentation. Clears the screen, waits, and clears again. If a script defines `_DEMO_START=$(date +%s)`, it automatically calculates and prints elapsed time.
+- **`say "text"`**: Prints main narrative points in bold cyan.
+- **`comment "text"`**: Prints italicized gray comments.
+- **`show_manifest "file.yaml"`** (and **`show_yaml "file.yaml"`**): Displays syntax-highlighted YAML/code using `gum format` or `bat`, falling back to `cat`.
+- **`show_image "image.png"`**: Renders an image in the terminal using `viu` if available, or displays a cleanly-styled placeholder box with `gum` (or styled text) when `viu` is not installed.
+- **`redhatsay "text"`**: Standardized wrapper that handles both piped inputs and inline arguments, integrating with `gum format` and formatting text as a red double-bordered box if the physical `redhatsay` command is absent.
+
 ---
 
 ## 3. Safe Agent Execution Rules

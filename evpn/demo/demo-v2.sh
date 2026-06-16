@@ -21,7 +21,7 @@ cd "${REPO_ROOT}"
 
 # Configuration
 TYPE_SPEED=${TYPE_SPEED:-40}
-DEMO_PROMPT="${GREEN}❯ ${COLOR_RESET}"
+DEMO_PROMPT="${GREEN}\$ ${COLOR_RESET}"
 EVPN_DIR="evpn"
 export KUBECONFIG_C1="${EVPN_DIR}/kubeconfig.evpn-cluster1"
 export KUBECONFIG_C2="${EVPN_DIR}/kubeconfig.evpn-cluster2"
@@ -35,11 +35,11 @@ HAS_REDHATSAY=false && command -v redhatsay &>/dev/null && HAS_REDHATSAY=true
 # Create temp kubectl wrappers so pe commands show short aliases instead of full kubeconfig paths
 TMP_KUBE_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_KUBE_DIR}"' EXIT
-cat > "${TMP_KUBE_DIR}/kubectl-c1" <<'WRAPPER'
+cat >"${TMP_KUBE_DIR}/kubectl-c1" <<'WRAPPER'
 #!/usr/bin/env bash
 exec kubectl --kubeconfig="${KUBECONFIG_C1}" "$@"
 WRAPPER
-cat > "${TMP_KUBE_DIR}/kubectl-c2" <<'WRAPPER'
+cat >"${TMP_KUBE_DIR}/kubectl-c2" <<'WRAPPER'
 #!/usr/bin/env bash
 exec kubectl --kubeconfig="${KUBECONFIG_C2}" "$@"
 WRAPPER
@@ -48,54 +48,54 @@ export PATH="${TMP_KUBE_DIR}:${PATH}"
 
 # Helper formatting
 function act() {
-  clear
-  if [ "$HAS_GUM" = true ]; then
-    gum style --bold --foreground=226 --border=double --padding="1 2" --margin="1 1" "Act $1 — $2"
-  else
-    printf '\n\033[1;33mAct %s — %s\033[0m\n\n' "$1" "$2"
-  fi
-  wait
-  clear
+    clear
+    if [ "$HAS_GUM" = true ]; then
+        gum style --bold --foreground=226 --border=double --padding="1 2" --margin="1 1" "Act $1 — $2"
+    else
+        printf '\n\033[1;33mAct %s — %s\033[0m\n\n' "$1" "$2"
+    fi
+    wait
+    clear
 }
 
 function say() {
-  if [ "$HAS_GUM" = true ]; then
-    echo "$1" | gum style --bold --padding="1 2" --margin="1 0" --foreground="${2:-117}"
-  else
-    printf '\n\033[1;36m%s\033[0m\n\n' "$1"
-  fi
+    if [ "$HAS_GUM" = true ]; then
+        echo "$1" | gum style --bold --padding="1 2" --margin="1 0" --foreground="${2:-117}"
+    else
+        printf '\n\033[1;36m%s\033[0m\n\n' "$1"
+    fi
 }
 
 function comment() {
-  if [ "$HAS_GUM" = true ]; then
-    echo "$1" | gum style --italic --foreground=245 --padding="0 2"
-  else
-    printf '\033[3m%s\033[0m\n' "$1"
-  fi
+    if [ "$HAS_GUM" = true ]; then
+        echo "$1" | gum style --italic --foreground=245 --padding="0 2"
+    else
+        printf '\033[3m%s\033[0m\n' "$1"
+    fi
 }
 
 function show_manifest() {
-  if [ "$HAS_GUM" = true ]; then
-    cat "$1" | gum format -t code -l yaml
-  else
-    cat "$1"
-  fi
+    if [ "$HAS_GUM" = true ]; then
+        cat "$1" | gum format -t code -l yaml
+    else
+        cat "$1"
+    fi
 }
 
 function redhatsay() {
-  if [ "$HAS_GUM" = true ] && [ "$HAS_REDHATSAY" = true ]; then
-    printf '%s\n' "$1" | gum format -t markdown 2>/dev/null | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-  elif [ "$HAS_REDHATSAY" = true ]; then
-    printf '%s\n' "$1" | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-  else
-    printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-  fi
+    if [ "$HAS_GUM" = true ] && [ "$HAS_REDHATSAY" = true ]; then
+        printf '%s\n' "$1" | gum format -t markdown 2>/dev/null | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
+    elif [ "$HAS_REDHATSAY" = true ]; then
+        printf '%s\n' "$1" | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
+    else
+        printf '\n\033[1;31m%s\033[0m\n\n' "$1"
+    fi
 }
 
 # Pre-flight Check: Ensure BGP infra is running
 if [[ ! -f "${KUBECONFIG_C1}" || ! -f "${KUBECONFIG_C2}" ]]; then
-  echo -e "${RED}Error: Kubeconfigs not found. Run './evpn/clusters-v2.sh create' first to stand up BGP infra.${COLOR_RESET}"
-  exit 1
+    echo -e "${RED}Error: Kubeconfigs not found. Run './evpn/clusters-v2.sh create' first to stand up BGP infra.${COLOR_RESET}"
+    exit 1
 fi
 
 # Pre-flight Reset (Silently reset active EVPN config to pristine starting state)
@@ -107,10 +107,10 @@ KUBECONFIG="${KUBECONFIG_C2}" kubectl delete vtep,cudn,ra --all --timeout=15s >/
 
 # Wait for namespaces to be fully gone from both clusters (Kubernetes deletes them asynchronously)
 for kc in "${KUBECONFIG_C1}" "${KUBECONFIG_C2}"; do
-  while KUBECONFIG="${kc}" kubectl get ns vm-workloads >/dev/null 2>&1; do
-    echo "Waiting for namespace vm-workloads to be completely deleted on cluster..."
-    sleep 2
-  done
+    while KUBECONFIG="${kc}" kubectl get ns vm-workloads >/dev/null 2>&1; do
+        echo "Waiting for namespace vm-workloads to be completely deleted on cluster..."
+        sleep 2
+    done
 done
 
 # Ensure Web UI is running
@@ -127,6 +127,9 @@ on isolated podman networks
 connected via BGP EVPN and eBGP transit'
 wait
 clear
+p ""
+pei "ls -al"
+p ""
 
 say "Baseline Infrastructure:
   - 2 Kind clusters on ISOLATED podman networks:
@@ -285,8 +288,8 @@ wait
 show_manifest "${MANIFESTS_DIR}/namespace.yaml"
 
 comment "Creating and labeling the namespaces simultaneously..."
-pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/namespace.yaml"
-pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/namespace.yaml"
 wait
 clear
 
@@ -302,9 +305,9 @@ wait
 show_manifest "${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
 
 comment "Applying the fabric configurations to both clusters..."
-pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
-pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/evpn-fabric-c2.yaml"
-wait
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
+pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/evpn-fabric-c2.yaml"
+p ""
 
 comment "Verifying acceptance of EVPN configurations on Cluster 1..."
 pe "kubectl-c1 get vtep,cudn,ra"
@@ -384,13 +387,13 @@ pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.
 VM_A_IP=$(KUBECONFIG="${KUBECONFIG_C1}" kubectl get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
 VM_B_IP=$(KUBECONFIG="${KUBECONFIG_C2}" kubectl get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
 if [[ -n "${VM_A_IP}" && "${VM_A_IP}" == "${VM_B_IP}" ]]; then
-  comment "Same IP detected! Recreating vm-b to get a different allocation..."
-  pe "kubectl-c2 delete pod vm-b -n vm-workloads --force --grace-period=0 --wait=false"
-  sleep 5
-  pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
-  pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
-  comment "Checking VM-B's new IP..."
-  pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
+    comment "Same IP detected! Recreating vm-b to get a different allocation..."
+    pe "kubectl-c2 delete pod vm-b -n vm-workloads --force --grace-period=0 --wait=false"
+    sleep 5
+    pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
+    pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
+    comment "Checking VM-B's new IP..."
+    pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 fi
 wait
 clear
@@ -489,9 +492,9 @@ wait
 
 comment "Opening the Web UI in your browser..."
 if command -v open &>/dev/null; then
-  open "http://localhost:8080"
+    open "http://localhost:8080"
 elif command -v xdg-open &>/dev/null; then
-  xdg-open "http://localhost:8080" >/dev/null 2>&1 || true
+    xdg-open "http://localhost:8080" >/dev/null 2>&1 || true
 fi
 wait
 
