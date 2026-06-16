@@ -30,7 +30,7 @@ func (f *frrCollector) collectEVPN(ctx context.Context) model.EVPNState {
 	state := model.EVPNState{}
 	seenVNI := map[int]bool{}
 
-	vnis, type2, type3 := f.evpnState(ctx, "evpn-edge1")
+	vnis, type2, type3, routes := f.evpnState(ctx, "evpn-edge1")
 	for _, v := range vnis {
 		if !seenVNI[v.VNI] {
 			seenVNI[v.VNI] = true
@@ -39,6 +39,7 @@ func (f *frrCollector) collectEVPN(ctx context.Context) model.EVPNState {
 	}
 	state.Type2Count = type2
 	state.Type3Count = type3
+	state.Routes = routes
 
 	if len(state.VNIs) == 0 {
 		state.VNIs = []model.VNI{{
@@ -99,7 +100,7 @@ func (f *frrCollector) bgpSessions(ctx context.Context, edge string) []model.BGP
 	return sessions
 }
 
-func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model.VNI, type2Count int, type3Count int) {
+func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model.VNI, type2Count int, type3Count int, routes []model.EVPNRoute) {
 	ctx2, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
@@ -115,11 +116,11 @@ func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model
 	}
 
 	knownKeys := map[string]bool{
-		"bgpTableVersion":    true,
-		"bgpLocalRouterId":   true,
-		"defaultLocPrf":      true,
-		"localAS":            true,
-		"totalPrefixCounter": true,
+		"bgpTableVersion":     true,
+		"bgpLocalRouterId":    true,
+		"defaultLocPrf":       true,
+		"localAS":             true,
+		"totalPrefixCounter":  true,
 		"failedToParseCounter": true,
 	}
 
@@ -161,6 +162,36 @@ func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model
 				if peer, ok := path["peerId"].(string); ok && peer != "" {
 					vtepSet[peer] = true
 				}
+
+				mac, _ := path["mac"].(string)
+				ip, _ := path["ip"].(string)
+				ipLen := 0
+				if il, ok := path["ipLen"].(float64); ok {
+					ipLen = int(il)
+				}
+				var nextHop string
+				if nhs, ok := path["nexthops"].([]interface{}); ok && len(nhs) > 0 {
+					if first, ok := nhs[0].(map[string]interface{}); ok {
+						nhIP, _ := first["ip"].(string)
+						nextHop = nhIP
+					}
+				}
+				if nextHop == "" {
+					nextHop, _ = path["peerId"].(string)
+				}
+				peerID, _ := path["peerId"].(string)
+				remoteVTEP, _ := path["remoteVtep"].(string)
+
+				routes = append(routes, model.EVPNRoute{
+					Type:       int(rt),
+					MAC:        mac,
+					IP:         ip,
+					IPLen:      ipLen,
+					NextHop:    nextHop,
+					PeerID:     peerID,
+					RemoteVTEP: remoteVTEP,
+					VNI:        110,
+				})
 			}
 		}
 	}
@@ -175,7 +206,7 @@ func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model
 		RT:          "64512:110",
 		RemoteVTEPs: remoteVTEPs,
 	})
-	return vnis, type2Count, type3Count
+	return vnis, type2Count, type3Count, routes
 }
 
 func (f *frrCollector) evpnVNI(ctx context.Context, edge string) []model.VNI {

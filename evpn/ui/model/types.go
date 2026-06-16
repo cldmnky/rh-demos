@@ -3,13 +3,14 @@ package model
 import "time"
 
 type Topology struct {
-	Clusters    []Cluster    `json:"clusters"`
-	Edges       []Edge       `json:"edges"`
-	Workloads   []Workload   `json:"workloads"`
-	BGP         []BGPSession `json:"bgp"`
-	EVPN        EVPNState    `json:"evpn"`
-	RouteEvents []RouteEvent `json:"route_events,omitempty"`
-	GeneratedAt time.Time    `json:"generated_at"`
+	Clusters       []Cluster    `json:"clusters"`
+	Edges          []Edge       `json:"edges"`
+	Workloads      []Workload   `json:"workloads"`
+	BGP            []BGPSession `json:"bgp"`
+	EVPN           EVPNState    `json:"evpn"`
+	RouteEvents    []RouteEvent `json:"route_events,omitempty"`
+	TransitSubnet  string       `json:"transit_subnet,omitempty"`
+	GeneratedAt    time.Time    `json:"generated_at"`
 }
 
 type RouteEvent struct {
@@ -40,11 +41,12 @@ type Device struct {
 }
 
 type Edge struct {
-	Name   string `json:"name"`
-	IP     string `json:"ip"`
-	Role   string `json:"role"`
-	State  string `json:"state"`
-	AS     int    `json:"as"`
+	Name       string `json:"name"`
+	IP         string `json:"ip"`
+	TransitIP  string `json:"transit_ip,omitempty"`
+	Role       string `json:"role"`
+	State      string `json:"state"`
+	AS         int    `json:"as"`
 }
 
 type Workload struct {
@@ -69,9 +71,10 @@ type BGPSession struct {
 }
 
 type EVPNState struct {
-	VNIs       []VNI `json:"vnis"`
-	Type2Count int   `json:"type2_count"`
-	Type3Count int   `json:"type3_count"`
+	VNIs       []VNI       `json:"vnis"`
+	Type2Count int         `json:"type2_count"`
+	Type3Count int         `json:"type3_count"`
+	Routes     []EVPNRoute `json:"routes"`
 }
 
 type VNI struct {
@@ -79,4 +82,15 @@ type VNI struct {
 	RD          string   `json:"rd"`
 	RT          string   `json:"rt"`
 	RemoteVTEPs []string `json:"remote_vteps"`
+}
+
+type EVPNRoute struct {
+	Type      int    `json:"type"`
+	MAC       string `json:"mac,omitempty"`
+	IP        string `json:"ip,omitempty"`
+	IPLen     int    `json:"ip_len,omitempty"`
+	NextHop   string `json:"next_hop"`
+	PeerID    string `json:"peer_id"`
+	RemoteVTEP string `json:"remote_vtep,omitempty"`
+	VNI       int    `json:"vni"`
 }

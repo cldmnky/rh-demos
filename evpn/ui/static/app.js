@@ -118,13 +118,23 @@ function renderEVPN(evpn) {
     return;
   }
 
-  list.innerHTML = vnis.map(v => `
-    <div class="evpn-row">
-      <span class="evpn-vni">VNI ${v.vni}</span>
-      <span class="evpn-rd">RD ${v.rd || ''}</span>
-      <span class="evpn-vteps">${(v.remote_vteps || []).length} remote VTEPs</span>
-    </div>
-  `).join('');
+  list.innerHTML = vnis.map(v => {
+    const vteps = (v.remote_vteps || []).join(', ');
+    const type2 = evpn.type2_count || 0;
+    const type3 = evpn.type3_count || 0;
+    return `
+      <div class="evpn-row" onclick="showEVPNRoutes()" style="cursor:pointer">
+        <span class="evpn-vni">VNI ${v.vni}</span>
+        <span class="evpn-rd">RD ${v.rd || ''}</span>
+        <span class="evpn-vteps">${(v.remote_vteps || []).length} remote VTEPs</span>
+        <div class="evpn-detail">
+          <span class="evpn-rt">RT ${v.rt || ''}</span>
+          <span class="evpn-type-count">Type-2: ${type2}  Type-3: ${type3}</span>
+          ${vteps ? `<span class="evpn-vtep-list">VTEPs: ${vteps}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 /* Tab Navigation */
@@ -315,6 +325,107 @@ function showNodeDetails(nodeName) {
     .then(r => r.text())
     .then(t => document.getElementById('drawer-devices').textContent = t || 'No links.')
     .catch(e => document.getElementById('drawer-devices').textContent = 'Error: ' + e.message);
+}
+
+function showEVPNRoutes() {
+  currentDrawerID = 'evpn-routes';
+  toggleDrawer(true, 'EVPN Route Table');
+
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) { tabs.style.display = 'none'; }
+  switchDrawerTab(1);
+
+  const evpn = currentTopology && currentTopology.evpn;
+  const routes = (evpn && evpn.routes) || [];
+  const total = (evpn && ((evpn.type2_count || 0) + (evpn.type3_count || 0))) || 0;
+
+  document.getElementById('drawer-info').innerHTML = `
+    <p><strong>Total Routes:</strong> ${total}</p>
+    <p><strong>Type-2 (MAC/IP):</strong> ${(evpn && evpn.type2_count) || 0}</p>
+    <p><strong>Type-3 (IMET):</strong> ${(evpn && evpn.type3_count) || 0}</p>
+  `;
+
+  if (routes.length === 0) {
+    document.getElementById('drawer-fdb').textContent = 'No EVPN route details available.';
+    return;
+  }
+
+  const ipMap = typeof buildIPMap === 'function' && currentTopology ? buildIPMap(currentTopology) : {};
+
+  let html = '';
+  let type2Count = 0;
+  let type3Count = 0;
+  routes.forEach(r => {
+    const peerName = ipMap[r.peer_id] || r.peer_id;
+    const remote = r.remote_vtep ? ` (remote VTEP: ${r.remote_vtep})` : '';
+    if (r.type === 2) {
+      type2Count++;
+      const ipPart = r.ip ? `/${r.ip_len || 32}` : '';
+      html += `<div class="evpn-route type2">
+        <span class="route-type">Type-2</span>
+        <span class="route-mac">${r.mac || ''}</span>
+        <span class="route-arrow">→</span>
+        <span class="route-ip">${r.ip || ''}${ipPart}</span>
+        <span class="route-via">via ${peerName}${remote}</span>
+      </div>`;
+    } else {
+      type3Count++;
+      const ipStr = r.ip ? ` (${r.ip})` : '';
+      html += `<div class="evpn-route type3">
+        <span class="route-type">Type-3</span>
+        <span class="route-desc">IMET${ipStr}</span>
+        <span class="route-via">via ${peerName}${remote}</span>
+      </div>`;
+    }
+  });
+  document.getElementById('drawer-fdb').innerHTML = html || 'No EVPN route details.';
+  document.getElementById('drawer-neigh').textContent = '';
+  document.getElementById('drawer-devices').textContent = '';
+}
+
+function showTransitDetails() {
+  currentDrawerID = 'evpn-transit';
+  toggleDrawer(true, 'eBGP Transit Network');
+
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) { tabs.style.display = 'none'; }
+  switchDrawerTab(1);
+
+  const edges = (currentTopology && currentTopology.edges) || [];
+  const e1 = edges.find(e => e.name === 'evpn-edge1');
+  const e2 = edges.find(e => e.name === 'evpn-edge2');
+  const bgp = (currentTopology && currentTopology.bgp) || [];
+  const transitSessions = bgp.filter(s =>
+    (s.local === 'evpn-edge1' && s.remote === (e2 && e2.transit_ip)) ||
+    (s.local === 'evpn-edge2' && s.remote === (e1 && e1.transit_ip)) ||
+    (s.remote === (e1 && e1.transit_ip)) ||
+    (s.remote === (e2 && e2.transit_ip))
+  );
+
+  document.getElementById('drawer-info').innerHTML = `
+    <p><strong>Network:</strong> evpn-transit</p>
+    <p><strong>Subnet:</strong> ${(currentTopology && currentTopology.transit_subnet) || '10.250.0.0/24'}</p>
+    <p><strong>edge1 IP:</strong> ${(e1 && e1.transit_ip) || '—'}</p>
+    <p><strong>edge2 IP:</strong> ${(e2 && e2.transit_ip) || '—'}</p>
+    <p><strong>Protocol:</strong> eBGP (AS 65001 ↔ AS 65002)</p>
+    <p><strong>Peers:</strong> 2</p>
+  `;
+
+  const ipMap = typeof buildIPMap === 'function' && currentTopology ? buildIPMap(currentTopology) : {};
+  let html = transitSessions.map(s => {
+    const remoteName = ipMap[s.remote] || s.remote_name || s.remote;
+    const color = s.state === 'Up' || s.state === 'Established' ? '#3fb950' : '#f85149';
+    return `<div class="bgp-row" style="font-size:12px">
+      <span class="bgp-peer">${s.local} ↔ ${remoteName}</span>
+      <span class="bgp-state ${s.state}" style="color:${color}">${s.state}</span>
+      <span class="bgp-uptime">${s.uptime || ''}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('drawer-fdb').innerHTML = html ||
+    '<div class="empty">No transit BGP session data available.</div>';
+  document.getElementById('drawer-neigh').textContent = '';
+  document.getElementById('drawer-devices').textContent = '';
 }
 
 function showEdgeDetails(edgeName) {

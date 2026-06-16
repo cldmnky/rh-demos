@@ -84,6 +84,11 @@ func (c *Collector) collect(ctx context.Context) {
 	topo.EVPN = c.frrCollector.collectEVPN(ctx)
 	topo.Workloads = c.k8sCollector.collectWorkloads(ctx)
 
+	// Detect transit network (v2 demo): both edges have transit IPs
+	if len(topo.Edges) >= 2 && topo.Edges[0].TransitIP != "" && topo.Edges[1].TransitIP != "" {
+		topo.TransitSubnet = "10.250.0.0/24"
+	}
+
 	// Detect new workloads → generate route propagation events (skip first cycle)
 	currentWorkloads := make(map[string]bool)
 	var newestWorkload *model.Workload

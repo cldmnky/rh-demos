@@ -55,13 +55,17 @@ function initNetwork() {
     drawGroupBackdrop(ctx, -410, -270, 260, 235, "Cluster 1 (East)", COLORS.c1);
     drawGroupBackdrop(ctx, 150, -270, 260, 235, "Cluster 2 (West)", COLORS.c2);
     drawGroupBackdrop(ctx, -340, 40, 680, 120, "Provider Edge Core (BGP EVPN)", COLORS.edge);
+    // Transit backdrop only drawn when visible (checked in drawTransitBackdrop)
+    drawTransitBackdrop(ctx);
   });
 
   // Drill Down Click Listener
   network.on("click", function (params) {
     if (params.nodes.length > 0) {
       const nodeId = params.nodes[0];
-      if (nodeId.startsWith("evpn-edge")) {
+      if (nodeId === "evpn-transit") {
+        showTransitDetails();
+      } else if (nodeId.startsWith("evpn-edge")) {
         showEdgeDetails(nodeId);
       } else if (nodeId.startsWith("vm-")) {
         showWorkloadDetails(nodeId);
@@ -105,12 +109,48 @@ function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
   ctx.restore();
 }
 
+function drawTransitBackdrop(ctx) {
+  const topo = currentTopology;
+  if (!topo || !topo.transit_subnet) return;
+  ctx.save();
+  ctx.fillStyle = '#d299220a';
+  ctx.strokeStyle = '#d2992233';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  const r = 8;
+  const x = -200, y = 170, width = 400, height = 70;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#d29922aa';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText(('TRANSIT ' + topo.transit_subnet).toUpperCase(), x + 12, y + 22);
+  ctx.restore();
+}
+
 function buildIPMap(topo) {
   const m = {};
   (topo.clusters || []).forEach(c => {
-    (c.nodes || []).forEach(n => { m[n.kind_ip] = n.name; });
+    (c.nodes || []).forEach(n => {
+      m[n.kind_ip] = n.name;
+      if (n.ip) m[n.ip] = n.name;
+    });
   });
-  (topo.edges || []).forEach(e => { m[e.ip] = e.name; });
+  (topo.edges || []).forEach(e => {
+    m[e.ip] = e.name;
+    if (e.transit_ip) m[e.transit_ip] = e.name;
+  });
   return m;
 }
 
@@ -220,6 +260,48 @@ function updateGraph(topo) {
       title: `${edge.name}\nIP: ${edge.ip}\nAS: ${edge.as}\nState: ${edge.state}`,
     });
   });
+
+  // Transit network (v2 demo): cloud node + transit links between edges
+  if (topo.transit_subnet && topo.edges && topo.edges.length >= 2) {
+    const e1 = topo.edges[0];
+    const e2 = topo.edges[1];
+    nodes.push({
+      id: 'evpn-transit',
+      label: topo.transit_subnet,
+      x: 0,
+      y: 210,
+      shape: 'box',
+      color: { background: '#1a1a1a', border: '#d29922' },
+      font: { size: 10, color: '#d29922', face: 'monospace' },
+      title: 'eBGP Transit Network ' + topo.transit_subnet,
+      shapeProperties: { borderRadius: 8 },
+      margin: { top: 8, bottom: 8, left: 12, right: 12 },
+    });
+    edges.push({
+      id: 'edge1-transit',
+      from: 'evpn-edge1',
+      to: 'evpn-transit',
+      color: { color: '#d2992266', opacity: 0.4 },
+      width: 1,
+      dashes: [4, 4],
+      label: e1.transit_ip || '',
+      font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+      smooth: false,
+      title: 'eBGP: edge1 → transit (' + (e1.transit_ip || '') + ')',
+    });
+    edges.push({
+      id: 'edge2-transit',
+      from: 'evpn-edge2',
+      to: 'evpn-transit',
+      color: { color: '#d2992266', opacity: 0.4 },
+      width: 1,
+      dashes: [4, 4],
+      label: e2.transit_ip || '',
+      font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+      smooth: false,
+      title: 'eBGP: edge2 → transit (' + (e2.transit_ip || '') + ')',
+    });
+  }
 
   // Add workload pods to graph
   addPodsToGraph(topo, nodes, edges);

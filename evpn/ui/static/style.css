@@ -887,6 +887,88 @@ body.light-theme .ping-panel {
   cursor: not-allowed;
 }
 
+.evpn-row:hover {
+  background: var(--hover-bg);
+}
+
+.evpn-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  width: 100%;
+}
+
+.evpn-rt {
+  font-family: "SF Mono", Consolas, monospace;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.evpn-type-count {
+  font-family: "SF Mono", Consolas, monospace;
+  color: #7ee787;
+  font-size: 10px;
+}
+
+.evpn-vtep-list {
+  font-family: "SF Mono", Consolas, monospace;
+  color: #a371f7;
+  font-size: 10px;
+}
+
+/* EVPN Route entries in drawer */
+.evpn-route {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  margin: 2px 0;
+  font-family: "SF Mono", Consolas, monospace;
+}
+
+.evpn-route:hover {
+  background: var(--hover-bg);
+}
+
+.evpn-route.type2 {
+  border-left: 3px solid #58a6ff;
+}
+
+.evpn-route.type3 {
+  border-left: 3px solid #a371f7;
+}
+
+.route-type {
+  font-weight: 600;
+  color: var(--text-title);
+  min-width: 48px;
+}
+
+.route-mac {
+  color: #d29922;
+}
+
+.route-arrow {
+  color: var(--text-muted);
+}
+
+.route-ip {
+  color: #7ee787;
+}
+
+.route-desc {
+  color: var(--text-main);
+}
+
+.route-via {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: auto;
+}
+
 .terminal-log {
   flex: 1;
   background: var(--terminal-bg);

@@ -1,4 +1,5 @@
 .state/
+.fix_crds.rb
 edge*_frr.conf
 edge*_daemons
 kind-evpn-cluster*.yaml
