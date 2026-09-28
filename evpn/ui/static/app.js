@@ -439,10 +439,15 @@ function showEdgeDetails(edgeName) {
   }
   switchDrawerTab(1);
 
+  const edge = ((currentTopology && currentTopology.edges) || []).find(e => e.name === edgeName);
+  const as = (edge && edge.as) || '—';
+  const role = (edge && edge.role) || 'provider-edge (iBGP RR + eBGP transit)';
+
   document.getElementById('drawer-info').innerHTML = `
-    <p><strong>Reflector Name:</strong> ${edgeName}</p>
-    <p><strong>BGP AS:</strong> 64512</p>
-    <p><strong>Role:</strong> iBGP EVPN Route Reflector</p>
+    <p><strong>Edge Name:</strong> ${edgeName}</p>
+    <p><strong>Site IP:</strong> ${(edge && edge.ip) || '—'}</p>
+    <p><strong>BGP AS:</strong> ${as}</p>
+    <p><strong>Role:</strong> ${role}</p>
   `;
 
   // Fetch EVPN routes

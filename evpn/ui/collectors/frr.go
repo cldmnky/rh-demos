@@ -14,6 +14,16 @@ type frrCollector struct {
 	cfg Config
 }
 
+// edgePeerAddrs are the provider-edge addresses that may appear as BGP peers:
+// the legacy v1 edge addresses (10.89.0.100/101) and the v2 transit addresses
+// (edge1 10.250.0.1, edge2 10.250.0.2).
+var edgePeerAddrs = map[string]bool{
+	"10.89.0.100": true,
+	"10.89.0.101": true,
+	"10.250.0.1":  true,
+	"10.250.0.2":  true,
+}
+
 func newFrrCollector(cfg Config) *frrCollector {
 	return &frrCollector{cfg: cfg}
 }
@@ -84,7 +94,7 @@ func (f *frrCollector) bgpSessions(ctx context.Context, edge string) []model.BGP
 	var sessions []model.BGPSession
 	for addr, peer := range bgp.IPv4Unicast.Peers {
 		peerType := "node"
-		if addr == "10.89.0.100" || addr == "10.89.0.101" {
+		if edgePeerAddrs[addr] {
 			peerType = "edge"
 		}
 		sessions = append(sessions, model.BGPSession{
@@ -116,11 +126,11 @@ func (f *frrCollector) evpnState(ctx context.Context, edge string) (vnis []model
 	}
 
 	knownKeys := map[string]bool{
-		"bgpTableVersion":     true,
-		"bgpLocalRouterId":    true,
-		"defaultLocPrf":       true,
-		"localAS":             true,
-		"totalPrefixCounter":  true,
+		"bgpTableVersion":      true,
+		"bgpLocalRouterId":     true,
+		"defaultLocPrf":        true,
+		"localAS":              true,
+		"totalPrefixCounter":   true,
 		"failedToParseCounter": true,
 	}
 
