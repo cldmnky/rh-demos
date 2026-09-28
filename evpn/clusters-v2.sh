@@ -591,10 +591,10 @@ install_ovn_k_in_cluster() {
 
   fix_cni_version_and_system_pods "${kubeconfig}" "${name}"
 
-  # frr-k8s worker controllers fail to reach the kubernetes ClusterIP
-  # (10.96.0.1 / 10.97.0.1) due to OVN-K service proxy not programming
-  # the load balancer on workers.  Patch the daemonset so frr-k8s connects
-  # directly to the API server on port 6443 instead.
+  # The frr-k8s controller and status sidecar on workers cannot reach the
+  # kubernetes ClusterIP (10.96.0.1 / 10.97.0.1) because the OVN-K service
+  # proxy has not programmed that load balancer there. Patch both containers
+  # to connect directly to the API server on port 6443 instead.
   local cp_node api_ip
   cp_node=$(KUBECONFIG="${kubeconfig}" kubectl get nodes -l node-role.kubernetes.io/control-plane \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
@@ -602,7 +602,7 @@ install_ovn_k_in_cluster() {
     -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "${api}")
   _log "Patching frr-k8s-daemon in '${name}' to use direct API server at ${api_ip}:6443..."
   KUBECONFIG="${kubeconfig}" kubectl patch daemonset -n "${FRR_K8S_NAMESPACE}" frr-k8s-daemon --type=strategic \
-    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"frr-k8s\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]}]}}}}" \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"frr-k8s\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]},{\"name\":\"frr-status\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]}]}}}}" \
     >/dev/null 2>&1 || _warn "Failed to patch frr-k8s-daemon env vars in ${name}"
   _log "Waiting for frr-k8s-daemon rollout in '${name}'..."
   KUBECONFIG="${kubeconfig}" kubectl rollout status -n "${FRR_K8S_NAMESPACE}" \
