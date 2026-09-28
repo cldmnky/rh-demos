@@ -1,0 +1,28 @@
+# Act: BGP RouteAdvertisements — consumer pod on the exported segment.
+#
+# Apply AFTER udn-bgp-net.yaml is accepted (CUDN NetworkCreated + RA
+# Accepted), so the OVN logical switch exists before the pod's port is
+# created.
+#
+# NOTE: pinned to the control-plane node. In single-node-zone (interconnect)
+# clusters the control-plane controller also reconciles pods on other nodes
+# and can leave a worker-placed L2 pod port stuck as Type=remote in OVN
+# (upstream race); control-plane placement avoids it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: udn-web
+  namespace: udn-bgp
+spec:
+  containers:
+    - name: netexec
+      image: registry.k8s.io/e2e-test-images/agnhost:2.66.1
+      args: ["netexec", "--http-port=8080"]
+      ports:
+        - containerPort: 8080
+  nodeSelector:
+    kubernetes.io/hostname: evpn-cluster1-control-plane
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule

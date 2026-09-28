@@ -1,0 +1,55 @@
+# Act: BGP RouteAdvertisements — publish a pod network into the existing
+# BGP fabric WITHOUT any EVPN transport.
+#
+# A plain Layer2 ClusterUserDefinedNetwork (no `transport:`) whose pod subnet
+# is exported to the provider edges by a RouteAdvertisements object.
+# External (cross-site) clients reach pod IPs directly, unSNATed — the
+# "integrate Kubernetes with your existing BGP infrastructure" story.
+#
+# Apply to Cluster 1 (the "workload site"). NOTE: create the network first
+# and wait for NetworkCreated/Accepted before deploying pods — the pod's OVN
+# port only binds correctly once the logical switch exists.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: udn-bgp
+  labels:
+    k8s.ovn.org/primary-user-defined-network: ""
+---
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: bgp-l2
+  labels:
+    advertise: bgp
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: udn-bgp
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets:
+        - 192.170.10.0/24
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: udn-bgp-ra
+spec:
+  # targetVRF omitted → advertise over the default VRF using the default-VRF
+  # router of the selected FRRConfiguration (the same peering the EVPN fabric
+  # uses; frr-k8s merges both generated configurations).
+  advertisements:
+    - PodNetwork
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+      evpn-peer: edge
+  networkSelectors:
+    - networkSelectionType: ClusterUserDefinedNetworks
+      clusterUserDefinedNetworkSelector:
+        networkSelector:
+          matchLabels:
+            advertise: bgp

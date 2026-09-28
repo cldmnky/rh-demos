@@ -408,6 +408,30 @@ KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get frrconfiguration -n frr-k8s
 KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl logs -n metallb-system daemonset/metallb-speaker --tail=50
 ```
 
+### UDN export caveats (plain Layer2, no EVPN)
+
+Two behaviors observed while validating the BGP-exported UDN in these
+single-node-zone (interconnect) clusters:
+
+- **Stuck `Type=remote` pod ports.** The control-plane controller also
+  reconciles pods on other nodes and can mark a worker-placed L2 pod port
+  `Type=remote` in OVN; the worker controller never clears it (the type is
+  only part of the update when marking remote), leaving the port
+  `up: false` with no traffic in either direction. EVPN-transport networks
+  are unaffected (excluded from interconnect handling). The demo pins the
+  export consumer to the control-plane node (`udn-bgp-pod.yaml`) to avoid
+  it. Diagnose with:
+  ```bash
+  KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl exec -n ovn-kubernetes deploy/ovnkube-control-plane -- \
+    ovn-nbctl --no-leader-only list Logical_Switch_Port udn.bgp.bgp.l2_udn-bgp_udn-web | grep -E '^type|^up'
+  ```
+- **Slow gateway programming after CUDN recreate.** Deleting and recreating
+  the CUDN can leave node gateway state (breth1 allow-flows, VRF tables)
+  behind until the export RA is deleted and re-accepted — re-applying just
+  the RA re-arms it. The demo and test therefore create the network, wait
+  for CUDN `NetworkCreated` + RA `Accepted`, and only then deploy the pod
+  (`udn-bgp-net.yaml` before `udn-bgp-pod.yaml`).
+
 ### Node level — data plane devices
 
 ```bash

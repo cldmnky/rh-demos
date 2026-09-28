@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-# EVPN Multi-Cluster Stretched L2 Presentation Script
+# OVN-Kubernetes Multi-Tenant Networking — Presentation Script
 #
-# Starts from a pre-provisioned infrastructure baseline (clusters, edges, BGP peering).
-# Resets any active EVPN resources, then walks through:
-#   1. EVPN Fabric Config (VTEP, CUDN, RouteAdvertisements)
-#   2. BGP EVPN Session Status (eBGP transit between sites)
-#   3. Workload Deployment (vm-a / vm-b)
-#   4. Cross-Cluster L2 Connectivity (ARP & Ping)
-#   5. MetalLB BGP Services (LoadBalancer VIP over the eBGP transit)
-#   6. Web UI Live Visualization
+# Showcases what OVN-Kubernetes makes possible across isolated sites, for
+# both pods and virtual machines:
+#   0. Enterprise topology baseline (two sites, eBGP transit, provider edges)
+#   1. Tenant isolation with User Defined Networks (UDN, Layer3, primary)
+#   2. Publish a UDN into the existing BGP fabric — plain Layer2, NO EVPN
+#   3. Stretch L2 across sites with BGP EVPN (VNI 110)
+#   4. Cross-site connectivity (workloads, routes, ping)
+#   5. Cross-site LoadBalancer services with MetalLB over the same BGP fabric
+#   6. Live visualization dashboard
 #
-# Run from repo root:
+# Starts from a pre-provisioned infrastructure baseline (clusters, edges, BGP
+# peering, MetalLB). Run from repo root:
 #   ./evpn/demo/demo-v2.sh
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null || echo "${SCRIPT_DIR}/../..")
 cd "${REPO_ROOT}"
 
-# Include demo-magic
+# Include demo-magic and the shared presentation helpers (act, say, comment,
+# show_manifest, redhatsay, and a NO_WAIT-aware wait).
 . "${REPO_ROOT}/scripts/demo-magic.sh"
+. "${REPO_ROOT}/scripts/helpers.sh"
 
 # Configuration
 TYPE_SPEED=${TYPE_SPEED:-40}
@@ -27,11 +31,8 @@ EVPN_DIR="evpn"
 export KUBECONFIG_C1="${EVPN_DIR}/kubeconfig.evpn-cluster1"
 export KUBECONFIG_C2="${EVPN_DIR}/kubeconfig.evpn-cluster2"
 MANIFESTS_DIR="${EVPN_DIR}/demo/manifests-v2"
-
-# Feature detection
-HAS_GUM=false && command -v gum &>/dev/null && HAS_GUM=true
-HAS_BAT=false && command -v bat &>/dev/null && HAS_BAT=true
-HAS_REDHATSAY=false && command -v redhatsay &>/dev/null && HAS_REDHATSAY=true
+OPEN_BROWSER="${OPEN_BROWSER:-true}"
+_DEMO_START=$(date +%s)
 
 # Create temp kubectl wrappers so pe commands show short aliases instead of full kubeconfig paths
 TMP_KUBE_DIR="$(mktemp -d)"
@@ -47,70 +48,25 @@ WRAPPER
 chmod +x "${TMP_KUBE_DIR}/kubectl-c1" "${TMP_KUBE_DIR}/kubectl-c2"
 export PATH="${TMP_KUBE_DIR}:${PATH}"
 
-# Helper formatting
-function act() {
-    clear
-    if [ "$HAS_GUM" = true ]; then
-        gum style --bold --foreground=226 --border=double --padding="1 2" --margin="1 1" "Act $1 — $2"
-    else
-        printf '\n\033[1;33mAct %s — %s\033[0m\n\n' "$1" "$2"
-    fi
-    wait
-    clear
-}
-
-function say() {
-    if [ "$HAS_GUM" = true ]; then
-        echo "$1" | gum style --bold --padding="1 2" --margin="1 0" --foreground="${2:-117}"
-    else
-        printf '\n\033[1;36m%s\033[0m\n\n' "$1"
-    fi
-}
-
-function comment() {
-    if [ "$HAS_GUM" = true ]; then
-        echo "$1" | gum style --italic --foreground=245 --padding="0 2"
-    else
-        printf '\033[3m%s\033[0m\n' "$1"
-    fi
-}
-
-function show_manifest() {
-    if [ "$HAS_GUM" = true ]; then
-        cat "$1" | gum format -t code -l yaml
-    else
-        cat "$1"
-    fi
-}
-
-function redhatsay() {
-    if [ "$HAS_GUM" = true ] && [ "$HAS_REDHATSAY" = true ]; then
-        printf '%s\n' "$1" | gum format -t markdown 2>/dev/null | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-    elif [ "$HAS_REDHATSAY" = true ]; then
-        printf '%s\n' "$1" | command redhatsay 2>/dev/null || printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-    else
-        printf '\n\033[1;31m%s\033[0m\n\n' "$1"
-    fi
-}
-
 # Pre-flight Check: Ensure BGP infra is running
 if [[ ! -f "${KUBECONFIG_C1}" || ! -f "${KUBECONFIG_C2}" ]]; then
-    echo -e "${RED}Error: Kubeconfigs not found. Run './evpn/clusters-v2.sh create' first to stand up BGP infra.${COLOR_RESET}"
+    echo -e "${RED}Error: Kubeconfigs not found. Run './evpn/clusters-v2.sh create' first to stand up the infra.${COLOR_RESET}"
     exit 1
 fi
 
-# Pre-flight Reset (Silently reset active EVPN config to pristine starting state)
-echo -e "${GREY}Pre-flight: Cleaning up existing EVPN resources...${COLOR_RESET}"
-KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
+# Pre-flight Reset (silently reset demo state to a pristine starting point)
+echo -e "${GREY}Pre-flight: Cleaning up existing demo resources...${COLOR_RESET}"
+KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns vm-workloads tenant-a udn-bgp --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C1}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
+KUBECONFIG="${KUBECONFIG_C2}" kubectl delete frrconfiguration udn-subnets -n frr-k8s-system --ignore-not-found >/dev/null 2>&1 &
 
 # Wait for namespaces to be fully gone from both clusters (Kubernetes deletes them asynchronously)
 for kc in "${KUBECONFIG_C1}" "${KUBECONFIG_C2}"; do
-    for ns in vm-workloads l3-services; do
+    for ns in vm-workloads l3-services tenant-a udn-bgp; do
         while KUBECONFIG="${kc}" kubectl get ns "${ns}" >/dev/null 2>&1; do
             echo "Waiting for namespace ${ns} to be completely deleted on cluster..."
             sleep 2
@@ -125,348 +81,293 @@ done
 # INTRO
 # ==============================================================
 clear
-redhatsay '**EVPN Multi-Cluster Stretched L2 Demo**
+redhatsay '**OVN-Kubernetes Multi-Tenant Networking**
 
-Two Kubernetes clusters
-on isolated podman networks
-connected via BGP EVPN and eBGP transit
-— plus cross-site BGP services with MetalLB'
+Isolation for tenants  •  BGP integration
+Stretched L2 for VMs and pods  •  BGP services'
 wait
 clear
 p ""
 pei "ls -al"
 p ""
 
-say "Baseline Infrastructure:
-  - 2 Kind clusters on ISOLATED podman networks:
-      Cluster 1 (East)  → evpn-site1   (10.100.0.0/24, AS 65001)
-      Cluster 2 (West)  → evpn-site2   (10.200.0.0/24, AS 65002)
-  - 2 FRR Edge routers connected via evpn-transit (10.250.0.0/24)
-  - eBGP peering between sites: edge1 (AS 65001) ↔ edge2 (AS 65002)
-  - iBGP within each site: cluster nodes ↔ local edge router
+say "Growing enterprise environments need network architecture that gives
+isolation, multi-tenancy and performance — for virtual machines AND pods.
 
-But there is NO stretched network and NO EVPN routes exchanged yet."
+Today, on one shared BGP fabric between two isolated sites:
+  1. Carve out an isolated tenant network (UDN) — segmentation in minutes
+  2. Publish a pod network straight into BGP — no overlay, no EVPN
+  3. Stretch one L2 segment across sites with BGP EVPN — VMs keep their IPs
+  4. Announce LoadBalancer services across sites with MetalLB
+
+Duration: ~25 minutes. Everything you see is real state on live clusters."
 wait
 clear
 
 # ==============================================================
-# TERMINOLOGY — BGP EVPN Concepts
+# ACT 0 — Enterprise topology baseline
 # ==============================================================
+act "0" "Baseline: Two Sites, One BGP Fabric"
 
-say "Before we dive in, let's establish a shared vocabulary.
-Understanding these terms makes everything clearer." 226
-wait
-clear
+say "The starting point mirrors an enterprise DC: two sites on isolated
+networks, provider edges in between, external BGP peering on a transit link.
 
-redhatsay '**Primer — BGP EVPN Terminology**
+  Cluster 1 (site 1)  → evpn-site1   (10.100.0.0/24, AS 65001)
+  Cluster 2 (site 2)  → evpn-site2   (10.200.0.0/24, AS 65002)
+  Edges peer eBGP: edge1 (10.250.0.1) ↔ edge2 (10.250.0.2)
 
-BGP  EVPN  VNI  VTEP  CUDN  VXLAN
-AS  iBGP  eBGP  Transit  Site-Networks'
-wait
-clear
-
-say "BGP (Border Gateway Protocol)
-──────────────────────────────────
-The routing protocol that carries EVPN route information
-between edge routers and cluster nodes. Think of BGP as
-the postal service of the network — it delivers route
-announcements. Two flavors:
-  • iBGP  — Internal BGP (same AS number)
-  • eBGP  — External BGP (different ASes)
-    Here: eBGP between edge1 (AS 65001) ↔ edge2 (AS 65002)" 117
-wait
-clear
-
-say "EVPN (Ethernet VPN)
-──────────────────────
-An extension of BGP for L2/L3 VPN services. Distributes
-MAC addresses and IP bindings via BGP instead of legacy
-flooding-based protocols. Key route types:
-  • Type-2 — MAC/IP Advertisement (workload location)
-  • Type-3 — IMET (BUM traffic flooding trees)" 117
-wait
-clear
-
-say "VNI (VXLAN Network Identifier)
-──────────────────────────────────
-A 24-bit tag (like a VLAN ID) for a virtual L2 segment.
-Our demo: VNI 110. Traffic between clusters is encapsulated
-in VXLAN tunnels tagged with this VNI, keeping each network
-isolated from others."
-wait
-clear
-
-say "VTEP (VXLAN Tunnel Endpoint)
-────────────────────────────────
-The source/destination IP of VXLAN tunnels. Each OVN-K
-worker node is a VTEP — it encapsulates outgoing traffic
-and decapsulates incoming VXLAN. EVPN Type-3 routes tell
-every VTEP which other VTEPs are in the same broadcast domain.
-VTEPs use their site network IPs (10.100.x.x or 10.200.x.x)."
-wait
-clear
-
-say "CUDN (Cluster User Defined Network)
-──────────────────────────────────────
-OVN-K CR that defines a network segment: subnet, topology
-(Layer2), VNI, MTU, IP allocation. The CUDN is the blueprint
-for the stretched network — the 'what.'"
-wait
-clear
-
-say "RouteAdvertisement (RA) & VTEP CRs
-──────────────────────────────────────
-  • RouteAdvertisement — OVN-K CR that tells frr-k8s to
-    advertise the CUDN's routes into BGP EVPN
-  • VTEP — OVN-K CR that configures the local VXLAN tunnel
-    endpoint CIDR, picking the correct source IP"
-wait
-clear
-
-say "VXLAN (Virtual eXtensible LAN)
-──────────────────────────────────
-L2-over-IP encapsulation. Wraps the original Ethernet frame
-in an outer IP/UDP envelope, addressed from source VTEP
-to destination VTEP. VNI in the VXLAN header identifies
-which L2 segment the frame belongs to."
-wait
-clear
-
-say "Transit & Site Networks
-────────────────────────────────────────
-  • Site Network — One podman bridge per cluster.
-    evpn-site1 (10.100.0.0/24) for C1, evpn-site2
-    (10.200.0.0/24) for C2. No direct routing between them.
-  • Transit Network — The podman bridge connecting the two
-    edge routers (evpn-transit, 10.250.0.0/24). This is
-    where eBGP peering happens between sites.
-  • Edges are dual-homed: site network + transit network.
-    They are the ONLY devices bridging the two sites." 117
-wait
-clear
-
-say "AS (Autonomous System)
-───────────────────────
-A collection of IP prefixes under one administrative domain,
-identified by a unique AS number. Here:
-  • AS 65001 — Cluster 1 + edge1 (iBGP domain)
-  • AS 65002 — Cluster 2 + edge2 (iBGP domain)
-  • eBGP between AS 65001 and AS 65002 on the transit
-This mirrors a real WAN: independent sites, external peering."
-wait
-clear
-
-say "That covers the essentials. Let's put them to work."
-wait
-clear
-
-# ==============================================================
-# ACT 0 — Network Topology
-# ==============================================================
-act "0" "Network Topology Overview"
-
-say "Before we configure EVPN, let's inspect the network layout.
-Each cluster lives on its own podman bridge network — completely isolated.
-The edge routers are the only containers that bridge the gap."
+No tenant networks, no stretched segments yet — just the underlay."
 wait
 
-comment "Showing podman networks (note the separate site + transit networks)..."
+comment "Separate site networks plus the shared transit..."
 pe "podman network ls --format 'table {{.Name}}\t{{.Driver}}' | grep -E 'NAME|evpn|kind'"
 wait
 
-comment "Edge1 is dual-homed: site1 (10.100.0.100) + transit (10.250.0.1)..."
+comment "The edges are the only bridge between sites (site + transit addresses)..."
 pe "podman inspect evpn-edge1 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
-wait
-
-comment "Edge2 is dual-homed: site2 (10.200.0.100) + transit (10.250.0.2)..."
 pe "podman inspect evpn-edge2 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
 wait
 clear
 
 # ==============================================================
-# ACT 1 — Creating the EVPN Fabric
+# ACT 1 — Tenant isolation with a plain UDN
 # ==============================================================
-act "1" "Configuring the Stretched L2 Segment"
+act "1" "Tenant Networks in Minutes (UDN)"
 
-say "We begin by creating a standard Namespace with the primary UDN label on both clusters."
+say "Use case one: a tenant team needs its own isolated network — for pods
+today, for VMs tomorrow. A namespace-scoped UserDefinedNetwork gives them
+exactly that: their own subnet, their own default route, unreachable from
+every other network in the cluster.
+
+One rule to know: the namespace must carry the primary-UDN label at creation
+time — admission policy rejects adding it later."
 wait
 
-show_manifest "${MANIFESTS_DIR}/namespace.yaml"
+show_manifest "${MANIFESTS_DIR}/udn-tenant.yaml"
 
-comment "Creating and labeling the namespaces simultaneously..."
-pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/namespace.yaml"
-pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+comment "One manifest: namespace + tenant network + first workload..."
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/udn-tenant.yaml"
+pe "kubectl-c1 wait --for=condition=Ready pod app-a -n tenant-a --timeout=30s"
 wait
 clear
 
-say "Now we define the Stretched Fabric. The VTEP CIDRs cover BOTH site networks
-(10.100.0.0/16 and 10.200.0.0/16) so OVN-K can pick the right source IP on each node.
-
-Both clusters share the same CUDN subnet (192.170.1.0/24). Since 'reservedSubnets'
-is Layer3-only (not supported for Layer2 topology in this OVN-K build), each
-cluster allocates independently. If both pods happen to get the same IP, we
-simply delete and recreate one — the next allocation will differ."
+say "The pod now has TWO interfaces: eth0 on the cluster network (kubelet
+healthchecks only) and ovn-udn1 on the tenant network with its own default
+route. For a VM the attachment point is the same: request the network by
+name and the address can even persist across live migration."
 wait
 
-show_manifest "${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
+comment "Tenant address on ovn-udn1, cluster address on eth0..."
+pe "kubectl-c1 exec app-a -n tenant-a -- ip -o addr | grep -v '127.0.0.1\|::1'"
+wait
 
-comment "Applying the fabric configurations to both clusters..."
+comment "Egress still works — SNATed through the node gateway..."
+pe "kubectl-c1 exec app-a -n tenant-a -- ping -c 2 10.100.0.100"
+wait
+
+comment "But pods on the cluster network are unreachable — native isolation, no policies needed..."
+pe "DNS_IP=\$(kubectl-c1 get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}'); kubectl-c1 exec app-a -n tenant-a -- ping -c 2 -W 1 \${DNS_IP} || true"
+wait
+clear
+
+redhatsay '**Tenant network: isolated, egressing, in one manifest**
+
+Same mechanism serves VMs — and IPs can persist
+across VM live migration'
+wait
+clear
+
+# ==============================================================
+# ACT 2 — Publish a UDN with BGP: Layer2, no EVPN
+# ==============================================================
+act "2" "Pods Directly on BGP — No EVPN Required"
+
+say "Use case two: integrate Kubernetes with the infrastructure you already
+have. A plain Layer2 ClusterUserDefinedNetwork — no EVPN transport, no VNI —
+whose pod subnet is exported into BGP by a RouteAdvertisements object.
+
+External clients then reach pod IPs directly, unSNATed. This is what
+third-party load balancers and existing DC fabrics need: real routes to
+real pods."
+wait
+
+comment "A flat L2 segment plus an export rule into the default VRF..."
+show_manifest "${MANIFESTS_DIR}/udn-bgp-net.yaml"
+
+comment "Network and export on cluster 1, receiver rule on cluster 2..."
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/udn-bgp-net.yaml"
+pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/udn-bgp-receive.yaml"
+wait
+
+comment "Wait for the export to be accepted before deploying the consumer..."
+pe "kubectl-c1 wait --for=jsonpath='{.status.conditions[?(@.type==\"Accepted\")].status}'=True routeadvertisements/udn-bgp-ra --timeout=60s"
+show_manifest "${MANIFESTS_DIR}/udn-bgp-pod.yaml"
+pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/udn-bgp-pod.yaml"
+pe "kubectl-c1 wait --for=condition=Ready pod udn-web -n udn-bgp --timeout=30s"
+wait
+clear
+
+say "Two things to notice in that manifest. First, the CUDN has NO transport
+field — this is ordinary OVN networking, announced as plain IPv4 unicast.
+Second, the RouteAdvertisements object omits targetVRF, so it exports over
+the default VRF using the SAME peering template as everything else in this
+demo — one BGP session per node, many consumers."
+wait
+
+comment "The export is accepted; the pod sits on the segment..."
+pe "kubectl-c1 get ra udn-bgp-ra -o wide"
+pe "kubectl-c1 exec udn-web -n udn-bgp -- ip -o addr | grep 192.170"
+wait
+
+comment "Edge1 learned the /24 from a cluster1 node over iBGP..."
+pe "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
+wait
+
+comment "Edge2 learned it over the eBGP transit (AS path 65001)..."
+pe "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
+wait
+clear
+
+say "Final proof, in both directions. The cluster2 nodes installed the pod
+subnet via edge2 — and the pod itself reaches across the transit. Pod IPs
+as first-class citizens of your existing routing domain."
+wait
+
+comment "Cluster2 worker installed the pod subnet (via edge2)..."
+pe "UDN_IP=\$(kubectl-c1 exec udn-web -n udn-bgp -- ip -o addr | grep -o '192\\.170\\.10\\.[0-9]*' | head -1); kubectl-c2 exec -n frr-k8s-system \$(kubectl-c2 get pods -n frr-k8s-system -l app.kubernetes.io/component=frr-k8s --field-selector spec.nodeName=evpn-cluster2-worker -o name | head -1) -c frr -- ip route get \${UDN_IP}"
+wait
+
+comment "And the pod reaches the remote site — its identity is routable..."
+pe "kubectl-c1 exec udn-web -n udn-bgp -- ping -c 3 10.200.0.3"
+wait
+clear
+
+redhatsay '**Pod IPs as BGP routes — consumable anywhere**
+
+No EVPN, no overlay. Just routes your DC already understands.'
+wait
+clear
+
+# ==============================================================
+# ACT 3 — Stretched L2 with BGP EVPN
+# ==============================================================
+act "3" "One L2 Segment Across Sites (BGP EVPN)"
+
+say "Use case three: seamless mobility. A virtual machine — or a pod — that
+keeps its MAC and IP while moving between sites needs one broadcast domain
+spanning both. BGP EVPN carries exactly that: MAC+IP bindings as Type-2
+routes, broadcast trees as Type-3, inside VXLAN tunnels between VTEPs.
+
+Four resources wire it up; the RouteAdvertisements controller generates the
+per-node FRR config from the template:"
+wait
+
+comment "Standard namespace, stretched fabric on both clusters..."
+show_manifest "${MANIFESTS_DIR}/namespace.yaml"
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/namespace.yaml"
+wait
+
+comment "VTEP + CUDN (VNI 110) + RouteAdvertisements on both sites..."
+show_manifest "${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
 pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/evpn-fabric-c1.yaml"
 pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/evpn-fabric-c2.yaml"
 p ""
 
-comment "Verifying acceptance of EVPN configurations on Cluster 1..."
+comment "Acceptance on both clusters..."
 pe "kubectl-c1 get vtep,cudn,ra"
 wait
 clear
 
-# ==============================================================
-# ACT 2 — BGP EVPN Convergence
-# ==============================================================
-act "2" "BGP EVPN Peerings and Routes (eBGP Transit)"
-
-say "The RouteAdvertisements controller auto-generated per-node BGP configuration!
-Let's inspect the FRR edge routers to verify that L2VPN EVPN routing has converged.
-
-The two edges peer via eBGP (different ASes) over the dedicated transit
-network — just like a real inter-site WAN deployment."
+say "The RouteAdvertisements controller auto-generated per-node BGP config.
+The two edges exchange EVPN over the eBGP transit — Type-3 (IMET) routes
+build the broadcast tree first, before any workload exists."
 wait
 
-comment "Checking BGP summary on evpn-edge1 (AS 65001) — note the eBGP peer to edge2..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp summary'"
-wait
-
-comment "Checking BGP L2VPN EVPN session states on evpn-edge1..."
+comment "Sessions converged over the transit (note the eBGP peer)..."
 pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn summary'"
 wait
 
-say "Now let's look at EVPN Type-3 (IMET — Inclusive Multicast Ethernet Tag) routes.
-These advertise which VTEPs belong to the same broadcast domain (VNI 110).
-Each worker node announces itself as an originator IP, forming the flooding list
-for BUM traffic (broadcast, unknown unicast, multicast) on the stretched segment.
-
-These routes flow: cluster1 nodes → edge1 (iBGP) → edge2 (eBGP) → cluster2 nodes."
-wait
-
-comment "Inspecting EVPN Type-3 (IMET) routes on evpn-edge1..."
+comment "Type-3 routes on edge1 — every worker announced as a VTEP..."
 pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type multicast'"
 wait
 
-comment "Verifying the same routes propagated to evpn-edge2 via eBGP transit..."
+comment "Same routes relayed to edge2 via eBGP..."
 pe "podman exec evpn-edge2 vtysh -c 'show bgp l2vpn evpn route type multicast'"
 wait
 clear
 
 # ==============================================================
-# ACT 3 — Deploying Workloads
+# ACT 4 — Workloads, Type-2 routes, ping
 # ==============================================================
-act "3" "Deploying Stretched Workloads"
+act "4" "Workloads on the Stretched Segment"
 
-say "Let's deploy two workloads. They are placed in different clusters but attach to the same primary network segment."
+say "Deploy one workload per site on the same L2 segment — name them VMs,
+they behave like it. Watch their MAC+IP appear as Type-2 routes, then ping
+across the isolated networks."
 wait
 
 show_manifest "${MANIFESTS_DIR}/pod-vm-a.yaml"
 show_manifest "${MANIFESTS_DIR}/pod-vm-b.yaml"
 
-comment "Spawning VM-A (Cluster 1) and VM-B (Cluster 2)..."
+comment "Spawning VM-A (site 1) and VM-B (site 2)..."
 pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/pod-vm-a.yaml"
 pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
 wait
 
-comment "Waiting for pods to reach Ready state..."
+say "For real virtual machines the attachment is identical: a KubeVirt VM
+requests the CUDN by name through the same NAD/IPAM mechanism, and the
+address can persist across live migration — so a VM keeps its identity
+while moving between these sites."
+wait
+
+comment "Waiting for Ready..."
 pe "kubectl-c1 wait --for=condition=Ready pod vm-a -n vm-workloads --timeout=30s"
 pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
 wait
 clear
 
-say "Let's extract their assigned CUDN IP addresses. Since 'reservedSubnets' is not supported for
-Layer2 topology, IPAM runs independently on each cluster. If both pods get the same IP, delete
-and recreate one pod until they differ (typically takes 1 retry)."
+say "Each cluster allocates CUDN IPs independently — there is no cross-site
+IPAM, which is inherent to stretched L2. If both land on the same address,
+recreate one."
+wait
 
-comment "Fetching VM-A CUDN IP (Cluster 1)..."
+comment "Fetching CUDN IPs from the pod annotations..."
 pe "kubectl-c1 get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
-
-comment "Fetching VM-B CUDN IP (Cluster 2)..."
 pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 
-# If both pods received the same IP, recreate one and retry
 VM_A_IP=$(KUBECONFIG="${KUBECONFIG_C1}" kubectl get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
 VM_B_IP=$(KUBECONFIG="${KUBECONFIG_C2}" kubectl get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
 if [[ -n "${VM_A_IP}" && "${VM_A_IP}" == "${VM_B_IP}" ]]; then
-    comment "Same IP detected! Recreating vm-b to get a different allocation..."
+    comment "Same IP detected! Recreating vm-b for a different allocation..."
     pe "kubectl-c2 delete pod vm-b -n vm-workloads --force --grace-period=0 --wait=false"
     sleep 5
     pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
     pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
-    comment "Checking VM-B's new IP..."
     pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 fi
 wait
 clear
 
-# ==============================================================
-# ACT 4 — Control Plane Verification
-# ==============================================================
-act "4" "Under the Hood: EVPN Type-2 Routes and Data Plane"
-
-say "As soon as the workloads spun up, OVN-K advertised their MAC + IP combinations
-into BGP EVPN as Type-2 (MAC/IP Advertisement) routes. Each entry shows:
-
-  [2]:[EthTag]:[MAClen]:[MAC]:[IPlen]:[IP]
-
-These routes travel across the eBGP transit:
-  Cluster 1 worker → edge1 (iBGP, AS 65001) → edge2 (eBGP, AS 65002) → Cluster 2 worker
-
-Let's verify the edge router has learned these routes."
+say "Type-2 (MAC/IP) routes now carry each workload's location through the
+transit — visible on both edges. Then the kernel does the rest: remote MACs
+land in the bridge FDB behind the remote VTEP."
 wait
 
-comment "Checking EVPN Type-2 (MAC/IP) routes on evpn-edge1..."
+comment "Type-2 routes on both edges..."
 pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type macip'"
-wait
-
-comment "Verifying Type-2 routes propagated to evpn-edge2 via eBGP..."
 pe "podman exec evpn-edge2 vtysh -c 'show bgp l2vpn evpn route type macip'"
 wait
 
-say "Those Type-2 routes are installed as forwarding entries in the kernel.
-The Linux Bridge FDB on the Cluster 1 worker node tells us which MAC address
-lives behind which remote VTEP IP. A remote MAC learned via EVPN will show up
-here with the destination tunnel endpoint.
-
-Let's check — we're looking for VM-B's MAC mapped to the Cluster 2 worker IP
-(on the evpn-site2 network, 10.200.0.x)."
-wait
-
-comment "Checking Linux Bridge FDB entries on the Cluster 1 worker node..."
-pe "podman exec evpn-cluster1-worker bridge fdb show dev evbr-evpn-vtep"
-wait
-
-say "And finally, the local ARP (neighbor) table on Cluster 1's SVI interface shows
-which IP addresses the local node has resolved on the stretched segment."
-wait
-
-# Resolve the SVI vlan interface name (svl2.<vni>) — it varies per deployment
-SVI_DEV=$(podman exec evpn-cluster1-worker sh -c "ip -br link | awk -F'[@ ]' '/svl2\./{print \$1; exit}'")
-
-comment "Checking local IP neighbor (ARP) table on Cluster 1 SVI interface (${SVI_DEV})..."
-pe "podman exec evpn-cluster1-worker ip neigh show dev ${SVI_DEV}"
+comment "Remote MAC in the kernel FDB behind the site-2 VTEP..."
+pe "podman exec evpn-cluster1-worker bridge fdb show dev evbr-evpn-vtep | grep -v permanent"
 wait
 clear
 
-# ==============================================================
-# ACT 5 — Connectivity and Ping
-# ==============================================================
-act "5" "Cross-Cluster Ping over Isolated Networks"
-
-say "Now, the moment of truth. Traffic must traverse:
-  VM-A → Cluster 1 worker (evpn-site1) → VXLAN tunnel →
-  Cluster 2 worker (evpn-site2) → VM-B
-
-The two clusters are on completely separate podman bridge networks,
-yet the EVPN overlay makes them appear as one Layer-2 segment."
+say "Moment of truth — traffic must traverse the VXLAN underlay between two
+completely separate podman networks, yet the overlay makes it one segment."
 wait
 
-# Extract VM-B IP and strip the mask for the command
 VM_B_IP_FULL=$(KUBECONFIG=${KUBECONFIG_C2} kubectl get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])")
 VM_B_IP=$(echo "${VM_B_IP_FULL}" | cut -d'/' -f1)
 
@@ -474,7 +375,7 @@ comment "Pinging VM-B (${VM_B_IP}) from inside VM-A..."
 pe "kubectl-c1 exec vm-a -n vm-workloads -- ping -c 4 ${VM_B_IP}"
 wait
 
-comment "Checking the pod ARP table inside VM-A..."
+comment "Remote MAC learned via EVPN, right in the pod ARP table..."
 pe "kubectl-c1 exec vm-a -n vm-workloads -- arp -a"
 wait
 clear
@@ -486,19 +387,16 @@ wait
 clear
 
 # ==============================================================
-# ACT 6 — MetalLB BGP Services
+# ACT 5 — MetalLB BGP Services
 # ==============================================================
-act "6" "Cross-Site Services with MetalLB (BGP)"
+act "5" "Cross-Site Services with MetalLB (BGP)"
 
-say "The stretched L2 segment carried pod traffic. Now let's advertise a
-Kubernetes LoadBalancer Service across the SAME BGP fabric using MetalLB.
+say "Use case four: expose services, not just pods. MetalLB announces a
+Kubernetes LoadBalancer VIP into the SAME BGP fabric — it shares the
+existing frr-k8s daemon with OVN-Kubernetes, so one session per node serves
+both consumers.
 
-MetalLB runs in FRR-K8s mode and shares the existing frr-k8s daemon with
-OVN-Kubernetes: both controllers publish FRRConfiguration objects, and
-frr-k8s merges them into a single FRR instance per node — one BGP session
-per node, two independent consumers.
-
-VIP pools (announced into BGP):
+VIP pools:
   Cluster 1 → 192.170.2.100-149
   Cluster 2 → 192.170.2.150-199"
 wait
@@ -514,10 +412,8 @@ pe "kubectl-c1 wait --for=condition=Available deployment/web -n l3-services --ti
 pe "kubectl-c1 get svc -n l3-services"
 wait
 
-say "MetalLB assigned the VIP and the node's FRR announced it to edge1 over
-the node's existing iBGP session. Edge1 redistributed it over the eBGP
-transit to edge2, which reflected it to the cluster2 nodes.
-Let's verify on both edges."
+say "The node's FRR announced the VIP to edge1 over iBGP; edge1 redistributed
+it over the eBGP transit; edge2 reflected it to the site-2 nodes."
 wait
 
 # Extract the assigned VIP
@@ -541,14 +437,10 @@ comment "Edge2 (AS 65002): the same VIP arrived over the eBGP transit from AS 65
 pe "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
 wait
 
-say "Finally, request the service from the other site. We use a host-network
-client on cluster2 so the request is routed purely by BGP:
-  node FIB → edge2 → eBGP transit → edge1 → cluster1 node
-where OVN-K's LoadBalancer DNATs it to the backend pod.
-
-The stretched-L2 pods themselves cannot reach default-network service VIPs —
-the EVPN transport isolates that network. Two independent data paths:
-L2 overlay for pod-to-pod, L3 BGP for service VIPs."
+say "Request it from the other site with a host-network client — routed
+purely by BGP (node FIB → edge2 → transit → edge1 → node), DNATed to the
+backend by OVN-K. Stretched-L2 pods can't reach service VIPs; two separate
+data paths, one shared control plane."
 wait
 
 comment "Deploying the client on cluster2 (host network — no L2 stretch)..."
@@ -577,36 +469,41 @@ clear
 
 redhatsay '**One BGP fabric, two consumers**
 
-OVN-K EVPN pods  +  MetalLB service VIPs
+OVN-K pod routes  +  MetalLB service VIPs
 sharing one FRR instance and one session per node'
 wait
 clear
 
 # ==============================================================
-# ACT 7 — Web UI Visualization
+# ACT 6 — Web UI Visualization
 # ==============================================================
-act "7" "Live Real-Time Web Visualization"
+act "6" "Live Real-Time Web Visualization"
 
-say "Let's open our live visualization dashboard at http://localhost:8080.
-We will see:
-  - Real-time topology with the separate site networks and transit link
-  - Circular Pod nodes hovering above their hosting worker nodes
-  - Live BGP sessions (iBGP within sites, eBGP on transit)
-  - Direct UI action: Launching a continuous ping and animating route propagation!"
+say "All of this state is visible live at http://localhost:8080:
+  - Topology with site networks and transit link
+  - Workloads with CUDN IPs and MACs
+  - BGP sessions (iBGP in sites, eBGP on transit)
+  - BGP Services panel — VIPs and where each edge learned them
+  - Try it: launch a ping and watch the route animation!"
 wait
 
 comment "Opening the Web UI in your browser..."
-if command -v open &>/dev/null; then
-    open "http://localhost:8080"
-elif command -v xdg-open &>/dev/null; then
-    xdg-open "http://localhost:8080" >/dev/null 2>&1 || true
+if [ "${OPEN_BROWSER}" = "true" ]; then
+    if command -v open &>/dev/null; then
+        open "http://localhost:8080"
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "http://localhost:8080" >/dev/null 2>&1 || true
+    fi
 fi
 wait
 
-say "Demo complete! You have successfully demonstrated OVN-K Stretched L2 EVPN
-across isolated networks with eBGP transit — and cross-site BGP services
-announced by MetalLB over the same fabric."
+say "Takeaways for growing, complex enterprise environments:
+  • Tenant isolation is a manifest away — UDNs segment pods AND VMs
+  • Pod networks plug straight into existing BGP — less operational complexity
+  • Stretched L2 over EVPN keeps VM/pod IPs stable across sites
+  • Services ride the same fabric with MetalLB
+  • One control plane, strict separation, standard protocols"
 
-redhatsay '**EVPN Stretched L2 + BGP Services — that'\''s how it works!**
+redhatsay '**OVN-Kubernetes networking — that'\''s how it works!**
 
-OVN-Kubernetes  BGP EVPN  eBGP transit  MetalLB'
+UDN  BGP  BGP EVPN  eBGP transit  MetalLB'

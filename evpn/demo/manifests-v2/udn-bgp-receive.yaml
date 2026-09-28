@@ -1,0 +1,23 @@
+# Act: BGP RouteAdvertisements (receiver side).
+#
+# Applied to Cluster 2 so its nodes install the pod subnet that Cluster 1
+# advertises (the default `evpn` FRRConfiguration has no toReceive; the
+# metallb-vips one only accepts the VIP supernet).
+apiVersion: frrk8s.metallb.io/v1beta1
+kind: FRRConfiguration
+metadata:
+  name: udn-subnets
+  namespace: frr-k8s-system
+spec:
+  bgp:
+    routers:
+      - asn: 65002
+        neighbors:
+          - address: 10.200.0.100
+            asn: 65002
+            port: 179
+            toReceive:
+              allowed:
+                prefixes:
+                  - prefix: 192.170.10.0/24
+                    le: 32
