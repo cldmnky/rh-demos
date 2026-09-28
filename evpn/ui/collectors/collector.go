@@ -27,6 +27,7 @@ type Collector struct {
 	k8sCollector       *k8sCollector
 	frrCollector       *frrCollector
 	dataplaneCollector *dataplaneCollector
+	metallbCollector   *metallbCollector
 }
 
 func New(cfg Config) *Collector {
@@ -42,6 +43,7 @@ func New(cfg Config) *Collector {
 		k8sCollector:       k8s,
 		frrCollector:       newFrrCollector(cfg),
 		dataplaneCollector: newDataplaneCollector(cfg),
+		metallbCollector:   newMetallbCollector(cfg),
 	}
 }
 
@@ -83,6 +85,7 @@ func (c *Collector) collect(ctx context.Context) {
 	topo.BGP = c.frrCollector.collectBGP(ctx)
 	topo.EVPN = c.frrCollector.collectEVPN(ctx)
 	topo.Workloads = c.k8sCollector.collectWorkloads(ctx)
+	topo.BGPServiceState = c.metallbCollector.collect(ctx)
 
 	// Detect transit network (v2 demo): both edges have transit IPs
 	if len(topo.Edges) >= 2 && topo.Edges[0].TransitIP != "" && topo.Edges[1].TransitIP != "" {

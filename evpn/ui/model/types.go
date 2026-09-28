@@ -3,14 +3,15 @@ package model
 import "time"
 
 type Topology struct {
-	Clusters       []Cluster    `json:"clusters"`
-	Edges          []Edge       `json:"edges"`
-	Workloads      []Workload   `json:"workloads"`
-	BGP            []BGPSession `json:"bgp"`
-	EVPN           EVPNState    `json:"evpn"`
-	RouteEvents    []RouteEvent `json:"route_events,omitempty"`
-	TransitSubnet  string       `json:"transit_subnet,omitempty"`
-	GeneratedAt    time.Time    `json:"generated_at"`
+	Clusters        []Cluster        `json:"clusters"`
+	Edges           []Edge           `json:"edges"`
+	Workloads       []Workload       `json:"workloads"`
+	BGP             []BGPSession     `json:"bgp"`
+	EVPN            EVPNState        `json:"evpn"`
+	BGPServiceState BGPServiceState  `json:"bgp_services"`
+	RouteEvents     []RouteEvent     `json:"route_events,omitempty"`
+	TransitSubnet   string           `json:"transit_subnet,omitempty"`
+	GeneratedAt     time.Time        `json:"generated_at"`
 }
 
 type RouteEvent struct {
@@ -93,4 +94,40 @@ type EVPNRoute struct {
 	PeerID    string `json:"peer_id"`
 	RemoteVTEP string `json:"remote_vtep,omitempty"`
 	VNI       int    `json:"vni"`
+}
+
+// BGPServiceState summarizes MetalLB LoadBalancer services and how their
+// VIPs are advertised across the provider edges.
+type BGPServiceState struct {
+	Installed bool          `json:"installed"` // MetalLB CRDs reachable in at least one cluster
+	Pools     []AddressPool `json:"pools,omitempty"`
+	VIPs      []VIP         `json:"vips,omitempty"`
+}
+
+type AddressPool struct {
+	Cluster   string   `json:"cluster"`
+	Name      string   `json:"name"`
+	Addresses []string `json:"addresses"`
+}
+
+type VIP struct {
+	Cluster        string       `json:"cluster"` // "c1" or "c2"
+	Namespace      string       `json:"namespace"`
+	Service        string       `json:"service"`
+	IP             string       `json:"ip"`
+	Ports          []string     `json:"ports,omitempty"` // e.g. "8080/TCP"
+	Pool           string       `json:"pool,omitempty"`
+	Age            string       `json:"age"`
+	Advertisements []VIPAdvert  `json:"advertisements"`
+}
+
+// VIPAdvert is the state of one VIP prefix in one edge's IPv4 unicast RIB.
+type VIPAdvert struct {
+	Edge     string `json:"edge"`                 // evpn-edge1 / evpn-edge2
+	Present  bool   `json:"present"`
+	PathFrom string `json:"path_from,omitempty"` // internal=iBGP (local site), external=eBGP (transit)
+	ASPath   string `json:"as_path,omitempty"`    // e.g. "65001" when learned via eBGP
+	NextHop  string `json:"next_hop,omitempty"`
+	Hostname string `json:"hostname,omitempty"`  // next-hop node hostname
+	Best     bool   `json:"best,omitempty"`
 }

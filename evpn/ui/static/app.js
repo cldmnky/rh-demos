@@ -51,6 +51,7 @@ function render(topo) {
   renderWorkloads(topo.workloads || []);
   renderBGP(topo.bgp || []);
   renderEVPN(topo.evpn);
+  renderBGPServices(topo.bgp_services);
   populatePingSelects(topo.workloads || []);
   drawTopology(topo);
 }
@@ -135,6 +136,85 @@ function renderEVPN(evpn) {
       </div>
     `;
   }).join('');
+}
+
+/* BGP Services (MetalLB) panel */
+function renderBGPServices(state) {
+  const list = document.getElementById('vip-list');
+  const count = document.getElementById('vip-count');
+
+  if (!state || !state.installed) {
+    count.textContent = '—';
+    list.innerHTML = '<div class="empty">MetalLB not installed</div>';
+    return;
+  }
+
+  const vips = state.vips || [];
+  if (vips.length === 0) {
+    count.textContent = '0 VIPs';
+    list.innerHTML = '<div class="empty">No LoadBalancer services with a VIP</div>';
+    return;
+  }
+
+  const advertised = vips.filter(v => (v.advertisements || []).filter(a => a.present).length >= 2).length;
+  count.textContent = advertised + '/' + vips.length + ' adv';
+
+  const pools = (state.pools || [])
+    .map(p => `<span class="vip-pool">${p.cluster}: ${p.name} (${(p.addresses || []).join(', ')})</span>`)
+    .join('');
+
+  list.innerHTML = (pools ? `<div class="vip-pools">${pools}</div>` : '') + vips.map(v => {
+    const ads = (v.advertisements || []).map(vipAdChip).join('');
+    return `
+      <div class="vip-row" onclick="showVIPRoutes('${v.ip}')" title="Show VIP route on both edges">
+        <div class="vip-main">
+          <span class="cluster-badge ${v.cluster}">${v.cluster}</span>
+          <span class="vip-svc">${v.namespace}/${v.service}</span>
+          <span class="vip-ip">${v.ip}</span>
+          <span class="vip-ports">${(v.ports || []).join(' ')}</span>
+          <span class="vip-age">${v.age || ''}</span>
+        </div>
+        <div class="vip-ads">${ads}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function vipAdChip(a) {
+  if (!a.present) {
+    return `<span class="vip-ad absent" title="prefix not in RIB">${a.edge} ✗</span>`;
+  }
+  const via = a.path_from === 'external'
+    ? `eBGP${a.as_path ? ' AS' + a.as_path : ''}`
+    : 'iBGP';
+  const nh = a.hostname ? `${a.hostname} (${a.next_hop})` : a.next_hop;
+  return `<span class="vip-ad present" title="via ${via}, next-hop ${nh}">${a.edge} ✓ ${via}</span>`;
+}
+
+/* VIP drill-down: show the VIP /32 on both provider edges */
+function showVIPRoutes(ip) {
+  currentDrawerID = 'vip-' + ip;
+  toggleDrawer(true, `VIP ${ip} — BGP advertisement`);
+
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) { tabs.style.display = 'none'; }
+  switchDrawerTab(1);
+
+  document.getElementById('drawer-info').innerHTML = `
+    <p><strong>VIP:</strong> ${ip}/32</p>
+    <p>How each provider edge learned the prefix:</p>
+  `;
+
+  document.getElementById('drawer-fdb').textContent = 'loading edge RIBs...';
+
+  Promise.all(['evpn-edge1', 'evpn-edge2'].map(edge =>
+    fetch(`${API}/edges/${edge}/vip/${ip}`)
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(r.statusText)))
+      .then(t => `===== ${edge} =====\n${t.trim() || '(no output)'}`)
+      .catch(e => `===== ${edge} =====\nerror: ${e.message}`)
+  )).then(blocks => {
+    document.getElementById('drawer-fdb').textContent = blocks.join('\n\n');
+  });
 }
 
 /* Tab Navigation */
@@ -305,7 +385,7 @@ function showNodeDetails(nodeName) {
   document.getElementById('drawer-info').innerHTML = `
     <p><strong>Hostname:</strong> ${nodeName}</p>
     <p><strong>CUDN Core Interface:</strong> ovn-udn1 (192.170.1.0/24)</p>
-    <p><strong>SVD VTEP Devices:</strong> evbr-evpn-vtep, evx4-evpn-vtep, svl2.1</p>
+    <p><strong>SVD VTEP Devices:</strong> evbr-evpn-vtep, evx4-evpn-vtep, svl2.x</p>
   `;
 
   // Fetch FDB

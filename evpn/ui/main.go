@@ -104,6 +104,7 @@ func newServer(c *collectors.Collector, hub *sseHub, staticDir string) http.Hand
 	mux.HandleFunc("GET /api/nodes/{name}/neigh", handleNodeNeigh)
 	mux.HandleFunc("GET /api/nodes/{name}/devices", handleNodeDevices)
 	mux.HandleFunc("GET /api/edges/{name}/routes", handleEdgeRoutes)
+	mux.HandleFunc("GET /api/edges/{name}/vip/{ip}", handleEdgeVIPRoute)
 	mux.HandleFunc("GET /api/cluster-resources/{cluster}", handleClusterResources)
 
 	fs := http.FileServer(http.Dir(staticDir))

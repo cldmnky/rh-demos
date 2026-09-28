@@ -981,3 +981,84 @@ body.light-theme .ping-panel {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ===== BGP Services (MetalLB) panel ===== */
+
+.vip-pools {
+  padding: 4px 12px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vip-pool {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.vip-row {
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin: 1px 0;
+  cursor: pointer;
+}
+
+.vip-row:hover {
+  background: var(--hover-bg);
+}
+
+.vip-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.vip-svc {
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vip-ip {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-main);
+  margin-left: auto;
+}
+
+.vip-ports,
+.vip-age {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.vip-ads {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+.vip-ad {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.vip-ad.present {
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.35);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.vip-ad.absent {
+  color: #f85149;
+  border-color: rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+}

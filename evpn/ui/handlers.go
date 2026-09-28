@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 
@@ -208,8 +209,12 @@ func handleNodeNeigh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exec ip neigh show dev svl2.1
-	cmd := []string{"ip", "neigh", "show", "dev", "svl2.1"}
+	// The L2 SVI VLAN id depends on the node's allocation order (svl2.1,
+	// svl2.2, ...), so resolve the first matching interface dynamically.
+	cmd := []string{"bash", "-c",
+		`dev=$(ip -br link | awk -F'@' '/^svl2\./{print $1; exit}'); ` +
+			`if [ -n "$dev" ]; then echo "# SVI $dev"; ip neigh show dev "$dev"; ` +
+			`else echo "no svl2.* interface found"; fi`}
 	out, err := collectors.ContainerExec(r.Context(), nodeName, cmd)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -276,10 +281,45 @@ func handleClusterResources(w http.ResponseWriter, r *http.Request) {
 		cpNode = "evpn-cluster2-control-plane"
 	}
 
-	cmd := []string{"kubectl", "get", "vtep,cudn,routeadvertisements,frrconfiguration", "-A", "-o", "wide"}
+	// OVN-K/frr-k8s resources plus (when installed) the MetalLB BGP service
+	// resources and LoadBalancer services. The MetalLB part degrades to a
+	// short note instead of failing the whole diagnostics view.
+	cmd := []string{"bash", "-c",
+		`kubectl get vtep,cudn,routeadvertisements,frrconfiguration -A -o wide; ` +
+			`echo; echo '--- MetalLB ---'; ` +
+			`kubectl get ipaddresspool,bgppeer,bgpadvertisement -n metallb-system -o wide 2>/dev/null ` +
+			`|| echo 'MetalLB not installed'; ` +
+			`echo; echo '--- LoadBalancer services ---'; ` +
+			`kubectl get svc -A --field-selector spec.type=LoadBalancer`}
 	out, err := collectors.ContainerExec(r.Context(), cpNode, cmd)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get resources: %v, out: %s", err, out), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(out)
+}
+
+// handleEdgeVIPRoute shows how a single VIP /32 is present in one provider
+// edge's IPv4 unicast RIB (used by the BGP Services panel drill-down).
+func handleEdgeVIPRoute(w http.ResponseWriter, r *http.Request) {
+	edgeName := r.PathValue("name")
+	vip := strings.TrimSpace(r.PathValue("ip"))
+
+	if edgeName != "evpn-edge1" && edgeName != "evpn-edge2" {
+		http.Error(w, "invalid edge, must be evpn-edge1 or evpn-edge2", http.StatusBadRequest)
+		return
+	}
+	if net.ParseIP(vip) == nil {
+		http.Error(w, "invalid IP address", http.StatusBadRequest)
+		return
+	}
+
+	cmd := []string{"vtysh", "-c", "show bgp ipv4 unicast " + vip + "/32"}
+	out, err := collectors.ContainerExec(r.Context(), edgeName, cmd)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

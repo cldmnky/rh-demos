@@ -453,6 +453,10 @@ The UI shows:
 - **Workload inventory** — all pods in `vm-workloads`, their CUDN IPs and MACs
 - **BGP sessions** — per-edge session summary with state and prefix counts
 - **EVPN state** — VNI details, route-targets, remote VTEP count
+- **BGP services (MetalLB)** — VIP pools plus every LoadBalancer VIP and its
+  advertisement state on both edges (iBGP from the local site node vs eBGP
+  over the transit); clicking a VIP drills into `show bgp ipv4 unicast
+  <vip>/32` on both edges
 
 The UI container is attached to `evpn-site1`, `evpn-site2`, `evpn-transit`
 and `kind`, so it can inspect both edges (site + transit addresses) and both
