@@ -61,24 +61,36 @@ func (p *podmanCollector) collectClusters(ctx context.Context) []model.Cluster {
 }
 
 func (p *podmanCollector) collectEdges(ctx context.Context) []model.Edge {
-	var edges []model.Edge
-	for _, name := range []string{"evpn-edge1", "evpn-edge2"} {
-		ip := p.inspectSiteIP(ctx, name)
+	// v2 edges are dual-homed: one site network each plus the eBGP transit.
+	// Select the site address by explicit network name; the site network also
+	// tells us which edge AS (Site1 65001, Site2 65002) the edge runs.
+	edges := []struct {
+		name        string
+		siteNetwork string
+		as          int
+	}{
+		{name: "evpn-edge1", siteNetwork: "evpn-site1", as: 65001},
+		{name: "evpn-edge2", siteNetwork: "evpn-site2", as: 65002},
+	}
+
+	result := make([]model.Edge, 0, len(edges))
+	for _, e := range edges {
+		ip := p.inspectNetworkIP(ctx, e.name, e.siteNetwork)
 		if ip == "" {
-			ip = p.inspectIP(ctx, name)
+			ip = p.inspectIP(ctx, e.name)
 		}
-		transitIP := p.inspectNetworkIP(ctx, name, "evpn-transit")
-		state := p.inspectState(ctx, name)
-		edges = append(edges, model.Edge{
-			Name:      name,
+		transitIP := p.inspectNetworkIP(ctx, e.name, "evpn-transit")
+		state := p.inspectState(ctx, e.name)
+		result = append(result, model.Edge{
+			Name:      e.name,
 			IP:        ip,
 			TransitIP: transitIP,
-			Role:      "route-reflector",
+			Role:      "provider-edge (iBGP RR + eBGP transit)",
 			State:     state,
-			AS:        64512,
+			AS:        e.as,
 		})
 	}
-	return edges
+	return result
 }
 
 func (p *podmanCollector) inspectIP(ctx context.Context, name string) string {
