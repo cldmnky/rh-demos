@@ -1,0 +1,39 @@
+# MetalLB BGP service demo client (Cluster 2).
+#
+# Deliberately runs with hostNetwork: the proof we want is that the remote
+# site reaches the Cluster 1 LoadBalancer VIP purely through BGP unicast
+# routing (node FIB -> edge2 -> eBGP transit -> edge1 -> Cluster 1 node),
+# not through the EVPN L2 stretch.
+#
+# Note: pods attached to the stretched EVPN CUDN cannot reach default-network
+# ClusterIP/LoadBalancer services (the EVPN transport isolates the network),
+# so a UDN pod such as vm-b is not a valid client for this check.
+#
+# __VIP__ is substituted by the test/demo scripts with the VIP MetalLB
+# assigned to the l3-services/web service.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: l3-services
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vip-client
+  namespace: l3-services
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  containers:
+    - name: client
+      image: registry.k8s.io/e2e-test-images/agnhost:2.66.1
+      command:
+        - /bin/sh
+        - -c
+        - |
+          if wget -q -T 5 -O - http://__VIP__:8080/hostname; then
+            echo " VIP-OK"
+          else
+            echo " VIP-FAIL"
+            exit 1
+          fi

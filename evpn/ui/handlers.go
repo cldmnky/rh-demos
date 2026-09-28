@@ -74,7 +74,7 @@ func handleCreateWorkload(w http.ResponseWriter, r *http.Request) {
 	cmd := []string{
 		"kubectl", "run", req.Name,
 		"-n", "vm-workloads",
-		"--image=registry.k8s.io/e2e-test-images/agnhost:2.45",
+		"--image=registry.k8s.io/e2e-test-images/agnhost:2.66.1",
 		"--overrides=" + string(overridesJSON),
 		"--", "sleep", "infinity",
 	}

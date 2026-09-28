@@ -16,12 +16,18 @@
 #
 # Subcommands:
 #   create   - Create the 2 kind clusters, install OVN-K + EVPN + frr-k8s,
-#              deploy provider edge FRR containers, wire up VTEP/CUDN/RA
+#              deploy provider edge FRR containers, wire up VTEP/CUDN/RA,
+#              and install MetalLB sharing the same frr-k8s for BGP
+#              LoadBalancer service announcements
 #   destroy  - Delete the 2 clusters and tear down provider edge + networks
 #   start    - Start previously stopped kind nodes and provider edge
 #   stop     - Stop kind nodes and provider edge (preserves data + configs)
-#   status   - Show cluster, network, BGP, and EVPN state
+#   status   - Show cluster, network, BGP, EVPN and MetalLB state
 #   help     - Show this help
+#
+# create options:
+#   --skip-evpn      Do not create the stretched L2 fabric (VTEP/CUDN/RA)
+#   --skip-metallb   Do not install MetalLB / BGP service advertisements
 #
 # Layout produced:
 #   evpn/
@@ -45,6 +51,10 @@
 # - Prebuilt OVN-K image is used by default; override OVN_K_IMAGE to pin a tag.
 # - A Layer-2 stretched CUDN (default VNI 110, subnet 192.170.1.0/24) is
 #   created across both clusters using EVPN transport.
+# - MetalLB is installed in frr-k8s mode against the existing frr-k8s daemon
+#   (frr-k8s-system). MetalLB and OVN-K share one FRR instance per node via
+#   frr-k8s configuration merging, so LoadBalancer VIPs are announced over
+#   the same iBGP sessions the EVPN fabric already uses.
 
 set -euo pipefail
 
@@ -67,9 +77,11 @@ OVN_K_IMAGE_PULL_TIMEOUT="${OVN_K_IMAGE_PULL_TIMEOUT:-10m}"
 KIND_EXPERIMENTAL_PROVIDER="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 export KIND_EXPERIMENTAL_PROVIDER
 KIND_NETWORK="${KIND_NETWORK:-kind}"
-# kindest/node image: pin to a K8s version compatible with kind v0.27+
+# kindest/node image: pin to a K8s version compatible with the installed kind
+# release. v1.34.3 was published with kind v0.31.0, so `kind load` works with
+# that version or newer (newer 1.34.x patch images need kind v0.32+).
 KIND_IMAGE="${KIND_IMAGE:-docker.io/kindest/node}"
-K8S_VERSION="${K8S_VERSION:-v1.32.0}"
+K8S_VERSION="${K8S_VERSION:-v1.34.3}"
 
 # Cluster topology
 NAME_PREFIX="${NAME_PREFIX:-evpn-cluster}"
@@ -97,7 +109,9 @@ SITE1_AS="${SITE1_AS:-65001}"
 SITE2_AS="${SITE2_AS:-65002}"
 
 # Provider edge containers (podman)
-FRR_IMAGE="${FRR_IMAGE:-quay.io/frrouting/frr:10.1.0}"
+# Keep this in step with the FRR version bundled by frr-k8s (see
+# FRR_K8S_MANIFEST_URL below): v0.0.25 ships FRR 10.4.3.
+FRR_IMAGE="${FRR_IMAGE:-quay.io/frrouting/frr:10.4.3}"
 EDGE1_CONTAINER="${EDGE1_CONTAINER:-evpn-edge1}"
 EDGE2_CONTAINER="${EDGE2_CONTAINER:-evpn-edge2}"
 
@@ -108,10 +122,26 @@ EDGE1_TRANSIT_IP="${EDGE1_TRANSIT_IP:-10.250.0.1}"
 EDGE2_TRANSIT_IP="${EDGE2_TRANSIT_IP:-10.250.0.2}"
 
 # BGP / EVPN
-# Pinned to a tag (v0.0.21) of the frr-k8s all-in-one manifest that is known
-# to work with OVN-K EVPN. Override if you need a different version.
-FRR_K8S_MANIFEST_URL="${FRR_K8S_MANIFEST_URL:-https://raw.githubusercontent.com/metallb/frr-k8s/v0.0.21/config/all-in-one/frr-k8s.yaml}"
+# Pinned to a tag (v0.0.25) of the frr-k8s all-in-one manifest that is known
+# to work with OVN-K EVPN (and matches the FRR version used by FRR_IMAGE).
+# Override if you need a different version.
+FRR_K8S_MANIFEST_URL="${FRR_K8S_MANIFEST_URL:-https://raw.githubusercontent.com/metallb/frr-k8s/v0.0.25/config/all-in-one/frr-k8s.yaml}"
 FRR_K8S_NAMESPACE="${FRR_K8S_NAMESPACE:-frr-k8s-system}"
+
+# MetalLB — BGP Service (LoadBalancer VIP) announcements, sharing the same
+# frr-k8s instance that OVN-K uses (frr-k8s merges FRRConfigurations from
+# both controllers). Disable with INSTALL_METALLB=0.
+INSTALL_METALLB="${INSTALL_METALLB:-1}"
+METALLB_VERSION="${METALLB_VERSION:-0.16.1}"
+METALLB_NAMESPACE="${METALLB_NAMESPACE:-metallb-system}"
+METALLB_REPO_NAME="${METALLB_REPO_NAME:-metallb}"
+METALLB_REPO_URL="${METALLB_REPO_URL:-https://metallb.github.io/metallb}"
+# Per-cluster LoadBalancer VIP pools advertised into BGP (must not overlap
+# the site, transit, pod, service or CUDN subnets).
+METALLB_POOL_C1="${METALLB_POOL_C1:-192.170.2.100-192.170.2.149}"
+METALLB_POOL_C2="${METALLB_POOL_C2:-192.170.2.150-192.170.2.199}"
+# Supernet the cluster nodes accept from the edge (covers both VIP pools).
+METALLB_VIP_SUPERNET="${METALLB_VIP_SUPERNET:-192.170.2.0/24}"
 
 # EVPN stretched L2 network
 EVPN_NAMESPACE="${EVPN_NAMESPACE:-vm-workloads}"
@@ -119,6 +149,10 @@ CUDN_NAME="${CUDN_NAME:-stretched-l2}"
 CUDN_VNI="${CUDN_VNI:-110}"
 CUDN_SUBNETS="${CUDN_SUBNETS:-192.170.1.0/24}"
 VTEP_CIDRS="${VTEP_CIDRS:-10.100.0.0/16,10.200.0.0/16}"
+# Shared EVPN route-target used by BOTH clusters to import/export the MAC-VRF
+# (this is what makes the two sites one L2 domain). It is deliberately
+# independent of the BGP ASNs (65001/65002) — any common value works as long
+# as every member of the fabric uses the same route-target.
 ROUTE_TARGET="${ROUTE_TARGET:-64512:${CUDN_VNI}}"
 
 # Paths (under evpn/)
@@ -136,6 +170,10 @@ _err()   { printf '\033[1;31m[evpn]\033[0m %s\n' "$*" >&2; }
 _die()   { _err "$*"; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# `podman network exists` is more reliable than parsing `network ls` output,
+# which can race with container teardown and report a network as absent.
+podman_network_exists() { podman network exists "$1" >/dev/null 2>&1; }
 
 require() {
   command_exists "$1" || _die "Missing required command: $1"
@@ -219,7 +257,7 @@ EOF
 # ---------- Podman networks ----------
 
 ensure_kind_network() {
-  if ! podman network ls --format '{{.Name}}' | grep -qx "${KIND_NETWORK}"; then
+  if ! podman_network_exists "${KIND_NETWORK}"; then
     _log "Creating podman network '${KIND_NETWORK}'..."
     podman network create --driver bridge "${KIND_NETWORK}" >/dev/null
   else
@@ -230,7 +268,7 @@ ensure_kind_network() {
 ensure_site_networks() {
   local net subnet
   while read -r net subnet; do
-    if ! podman network ls --format '{{.Name}}' | grep -qx "${net}"; then
+    if ! podman_network_exists "${net}"; then
       _log "Creating podman network '${net}' (${subnet})..."
       podman network create --driver bridge --subnet "${subnet}" "${net}" >/dev/null
     else
@@ -244,7 +282,7 @@ EOF
 }
 
 maybe_remove_kind_network() {
-  if podman network ls --format '{{.Name}}' | grep -qx "${KIND_NETWORK}"; then
+  if podman_network_exists "${KIND_NETWORK}"; then
     local attached
     attached=$(podman network inspect "${KIND_NETWORK}" --format '{{len .Containers}}' 2>/dev/null || echo 0)
     if [[ "${attached}" == "0" ]]; then
@@ -259,7 +297,7 @@ maybe_remove_kind_network() {
 remove_site_networks() {
   local net
   for net in "${SITE1_NETWORK}" "${SITE2_NETWORK}" "${TRANSIT_NETWORK}"; do
-    if podman network ls --format '{{.Name}}' | grep -qx "${net}"; then
+    if podman_network_exists "${net}"; then
       local attached
       attached=$(podman network inspect "${net}" --format '{{len .Containers}}' 2>/dev/null || echo 0)
       if [[ "${attached}" == "0" ]]; then
@@ -290,14 +328,19 @@ ensure_ovn_k_repo() {
   fi
   [[ -d "${OVN_K_CACHE_DIR}/helm/ovn-kubernetes" ]] \
     || _die "Expected chart at ${OVN_K_CACHE_DIR}/helm/ovn-kubernetes after clone"
-  _patch_crds_for_k8s_compat
 }
 
 _podman_pull() {
   # `podman pull` has no --timeout flag in current releases; wrap with external
-  # `timeout` so a hung registry doesn't block the whole run.
+  # `timeout` so a hung registry doesn't block the whole run. GNU `timeout` is
+  # not installed on stock macOS (brew install coreutils); fall back gracefully.
   local img="$1" how_long="${OVN_K_IMAGE_PULL_TIMEOUT}"
-  timeout "${how_long}" podman pull --quiet "${img}"
+  if command_exists timeout; then
+    timeout "${how_long}" podman pull --quiet "${img}"
+  else
+    _warn "GNU 'timeout' not found (macOS: brew install coreutils); pulling without a timeout guard"
+    podman pull --quiet "${img}"
+  fi
 }
 
 ensure_ovn_k_image() {
@@ -435,46 +478,6 @@ connect_nodes_to_site_network() {
   done
 }
 
-# Strip CEL validation rules from OVN-K CRDs that require k8s 1.32+
-# feature gates (CELVariableScoping). These rules are data-plane validation
-# only — stripping them is harmless.
-_patch_crds_for_k8s_compat() {
-  local script="${SCRIPT_DIR}/.fix_crds.rb" crd_dir="${OVN_K_CACHE_DIR}/helm/ovn-kubernetes/crds"
-  cat > "${script}" <<-'RUBY'
-require "yaml"
-dir = ARGV.first or abort "Usage: #{$0} <crd-dir>"
-Dir["#{dir}/*.yaml"].each do |path|
-  data = YAML.safe_load(File.read(path), permitted_classes: [Symbol])
-  next unless data.is_a?(Hash) && data["spec"]
-  specs = data["spec"]
-  versions = specs["versions"] || [specs]
-  versions.each do |v|
-    schema = v.dig("schema", "openAPIV3Schema") || v
-    walk = lambda do |obj|
-      case obj
-      when Hash
-        if obj["x-kubernetes-validations"]
-          obj["x-kubernetes-validations"] = obj["x-kubernetes-validations"].select do |rule|
-            # strip self.all with 3+ args (map/keyed comprehension form)
-            r = rule["rule"].to_s
-            # strip any .all(k, v, ...) with 3+ args (keyed comprehension form)
-            !(r.include?(".all(") && r.count(",") >= 2)
-          end
-          obj.delete("x-kubernetes-validations") if obj["x-kubernetes-validations"].empty?
-        end
-        obj.each_value { |v| walk.call(v) }
-      when Array
-        obj.each { |v| walk.call(v) }
-      end
-    end
-    walk.call(schema)
-  end
-  File.write(path, YAML.dump(data))
-end
-RUBY
-  ruby "${script}" "${crd_dir}" && rm -f "${script}"
-}
-
 # ---------- OVN-K installation (per cluster) ----------
 
 # Parse an OCI image reference like "registry/path/repo:tag" or
@@ -580,21 +583,18 @@ install_ovn_k_in_cluster() {
   KUBECONFIG="${kubeconfig}" kubectl rollout status daemonset/ovnkube-node -n ovn-kubernetes --timeout 5m \
     || _warn "ovnkube-node daemonset not Ready in ${name} within 5m"
 
-  # Now that CNI is up, wait for frr-k8s pods (applied earlier) to become ready.
-  _log "Waiting for frr-k8s pods in '${name}'..."
-  KUBECONFIG="${kubeconfig}" kubectl wait -n "${FRR_K8S_NAMESPACE}" \
-    --for=condition=Available deployment/frr-k8s-statuscleaner --timeout 2m \
-    || _warn "frr-k8s-statuscleaner did not become Available in ${name}"
-  KUBECONFIG="${kubeconfig}" kubectl rollout status -n "${FRR_K8S_NAMESPACE}" \
-    daemonset/frr-k8s-daemon --timeout 2m \
-    || _warn "frr-k8s-daemon did not roll out in ${name}"
-
+  # CNI is up: patch the CNI result version and restart system pods that got
+  # stuck during the CNI-not-ready window.
   fix_cni_version_and_system_pods "${kubeconfig}" "${name}"
 
   # The frr-k8s controller and status sidecar on workers cannot reach the
   # kubernetes ClusterIP (10.96.0.1 / 10.97.0.1) because the OVN-K service
   # proxy has not programmed that load balancer there. Patch both containers
-  # to connect directly to the API server on port 6443 instead.
+  # to connect directly to the API server on port 6443 instead. This must
+  # happen before waiting for frr-k8s readiness — the worker pods would
+  # otherwise crashloop and every wait below would be a guaranteed timeout.
+  # Container names are version specific: v0.0.25 uses "controller" +
+  # "frr-status" (older releases used "frr-k8s" + "frr-status").
   local cp_node api_ip
   cp_node=$(KUBECONFIG="${kubeconfig}" kubectl get nodes -l node-role.kubernetes.io/control-plane \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
@@ -602,12 +602,25 @@ install_ovn_k_in_cluster() {
     -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "${api}")
   _log "Patching frr-k8s-daemon in '${name}' to use direct API server at ${api_ip}:6443..."
   KUBECONFIG="${kubeconfig}" kubectl patch daemonset -n "${FRR_K8S_NAMESPACE}" frr-k8s-daemon --type=strategic \
-    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"frr-k8s\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]},{\"name\":\"frr-status\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]}]}}}}" \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"controller\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]},{\"name\":\"frr-status\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]}]}}}}" \
     >/dev/null 2>&1 || _warn "Failed to patch frr-k8s-daemon env vars in ${name}"
-  _log "Waiting for frr-k8s-daemon rollout in '${name}'..."
+
+  # The status cleaner Deployment has the same ClusterIP problem; without the
+  # patch it crashloops forever on whichever node has no service proxy path.
+  _log "Patching frr-k8s-statuscleaner in '${name}' to use direct API server..."
+  KUBECONFIG="${kubeconfig}" kubectl patch deployment -n "${FRR_K8S_NAMESPACE}" frr-k8s-statuscleaner --type=strategic \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"frr-k8s-statuscleaner\",\"env\":[{\"name\":\"KUBERNETES_SERVICE_HOST\",\"value\":\"${api_ip}\"},{\"name\":\"KUBERNETES_SERVICE_PORT\",\"value\":\"6443\"}]}]}}}}" \
+    >/dev/null 2>&1 || _warn "Failed to patch frr-k8s-statuscleaner env vars in ${name}"
+
+  # Now that CNI is up and the API path is patched, wait for frr-k8s pods
+  # (applied earlier) to become ready.
+  _log "Waiting for frr-k8s pods in '${name}'..."
+  KUBECONFIG="${kubeconfig}" kubectl wait -n "${FRR_K8S_NAMESPACE}" \
+    --for=condition=Available deployment/frr-k8s-statuscleaner --timeout 3m \
+    || _warn "frr-k8s-statuscleaner did not become Available in ${name}"
   KUBECONFIG="${kubeconfig}" kubectl rollout status -n "${FRR_K8S_NAMESPACE}" \
-    daemonset/frr-k8s-daemon --timeout 2m >/dev/null 2>&1 \
-    || _warn "frr-k8s-daemon rollout not complete in ${name}"
+    daemonset/frr-k8s-daemon --timeout 3m \
+    || _warn "frr-k8s-daemon did not roll out in ${name}"
 
   # The frr-k8s webhook is unreachable from the kube-apiserver on worker
   # nodes (same ClusterIP issue).  Remove it so FRRConfiguration CRUD
@@ -625,14 +638,10 @@ install_frr_k8s() {
     curl -sSL --max-time 60 -o "${manifest}" "${FRR_K8S_MANIFEST_URL}" \
       || _die "Failed to download frr-k8s manifest from ${FRR_K8S_MANIFEST_URL}"
   fi
-  # gcr.io/kubebuilder/kube-rbac-proxy is unavailable post GCR shutdown
-  if grep -q 'gcr.io/kubebuilder/kube-rbac-proxy' "${manifest}"; then
-    sed -i.bak 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' "${manifest}" || true
-  fi
   # Apply frr-k8s resources (CRDs, RBAC, controllers). Do NOT wait for
   # pod readiness yet — CNI (OVN-K) must be running first.
   KUBECONFIG="${kubeconfig}" kubectl apply -f "${manifest}" >/dev/null
-  rm -f "${manifest}" "${manifest}.bak"
+  rm -f "${manifest}"
 }
 
 # OVN-K master writes cniVersion "1.1.0" into /etc/cni/net.d/10-ovn-kubernetes.conf
@@ -689,7 +698,7 @@ configure_edge() {
 
   {
     cat <<CONF
-frr version 10.1
+frr version 10.4
 frr defaults traditional
 hostname ${name}
 log syslog informational
@@ -714,6 +723,10 @@ CONF
   address-family ipv4 unicast
     neighbor ovn activate
     neighbor ovn route-reflector-client
+    # Rewrite next-hop on routes reflected to site nodes so that eBGP-learned
+    # routes (e.g. MetalLB VIPs announced by the remote site) carry a next-hop
+    # the nodes can resolve (our site IP) instead of the transit IP.
+    neighbor ovn next-hop-self
     neighbor sites activate
     neighbor sites next-hop-self
   exit-address-family
@@ -736,6 +749,13 @@ CONF
 
 # Shared: after deploy/start, discover IPs and configure both edges.
 _configure_edges() {
+  # Belt and braces: containers created before the --sysctl flag existed (or
+  # recreated from an old definition) may still have forwarding disabled.
+  local ctr
+  for ctr in "${EDGE1_CONTAINER}" "${EDGE2_CONTAINER}"; do
+    podman exec "${ctr}" sysctl -q -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+  done
+
   local e1_site e2_site e1_transit e2_transit
   e1_site=$(container_ip_on_network "${EDGE1_CONTAINER}" "${SITE1_NETWORK}")
   e2_site=$(container_ip_on_network "${EDGE2_CONTAINER}" "${SITE2_NETWORK}")
@@ -782,6 +802,35 @@ reconnect_transit_network() {
   fi
 }
 
+# True when the given edge reports the peer as Established in the L2VPN-EVPN
+# summary. The JSON is pretty-printed, so strip whitespace before matching the
+# peer object (peer objects contain no nested braces).
+_edge_transit_established() {
+  local ctr="$1" peer="$2"
+  podman exec "${ctr}" vtysh -c "show bgp l2vpn evpn summary json" 2>/dev/null \
+    | tr -d ' \n' | grep -o "\"${peer}\":{[^}]*}" | grep -q '"state":"Established"'
+}
+
+# The edges restart while being configured and the transit session can take a
+# minute to (re)establish. Wait for it so `create`/`start` return a converged
+# fabric and the demo/test do not race the session setup.
+wait_for_edge_convergence() {
+  _log "Waiting for the eBGP transit session between edges..."
+  local deadline=$(( $(date +%s) + 180 ))
+  while true; do
+    if _edge_transit_established "${EDGE1_CONTAINER}" "${EDGE2_TRANSIT_IP}" \
+       && _edge_transit_established "${EDGE2_CONTAINER}" "${EDGE1_TRANSIT_IP}"; then
+      _log "eBGP transit session established."
+      return 0
+    fi
+    if [[ $(date +%s) -gt "${deadline}" ]]; then
+      _warn "eBGP transit session not established within 180s; continuing anyway"
+      return 0
+    fi
+    sleep 3
+  done
+}
+
 # Create stub config files and start both edge containers.
 deploy_provider_edge() {
   local ctr name site_ip transit_ip site_network
@@ -795,7 +844,7 @@ bgpd=yes
 zebra=yes
 EOF
     cat > "${SCRIPT_DIR}/${name}_frr.conf" <<CONF
-frr version 10.1
+frr version 10.4
 frr defaults traditional
 hostname ${name}
 log syslog informational
@@ -808,11 +857,16 @@ CONF
       podman rm -f "${ctr}" >/dev/null
     fi
     _log "Creating container '${ctr}' (site=${site_ip} on ${site_network}, transit=${transit_ip})..."
+    # The edges route the VXLAN underlay between the two isolated site
+    # networks, so IPv4 forwarding must be on in the container netns. A fresh
+    # netns defaults to ip_forward=0, which silently breaks the EVPN data
+    # plane even though all control-plane sessions look healthy.
     podman run -d --name "${ctr}" \
       --network "${site_network}":ip="${site_ip}" \
       --network "${TRANSIT_NETWORK}":ip="${transit_ip}" \
       --network "${KIND_NETWORK}" \
       --privileged \
+      --sysctl net.ipv4.ip_forward=1 \
       -v "${SCRIPT_DIR}/${name}_frr.conf:/etc/frr/frr.conf" \
       -v "${SCRIPT_DIR}/${name}_daemons:/etc/frr/daemons" \
       -v "${SCRIPT_DIR}/edge_vtysh.conf:/etc/frr/vtysh.conf" \
@@ -864,22 +918,31 @@ apply_bgp_for_cluster() {
   local kubeconfig="$1" cluster_label="$2" peering_ip="$3" site_as="$4"
   [[ -n "${peering_ip}" ]] || _die "No peering IP provided for ${cluster_label}"
 
-  _log "Probing frr-k8s webhook in ${cluster_label}..."
-  local cp_node webhook_svc_ip attempts=0
-  cp_node=$(KUBECONFIG="${kubeconfig}" kubectl get nodes -l node-role.kubernetes.io/control-plane \
-    -o jsonpath='{.items[0].metadata.name}')
-  webhook_svc_ip=$(KUBECONFIG="${kubeconfig}" kubectl get svc -n "${FRR_K8S_NAMESPACE}" frr-k8s-webhook-service \
-    -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
-  if [[ -n "${cp_node}" && -n "${webhook_svc_ip}" ]]; then
-    while ! podman exec "${cp_node}" \
-        curl -ksS --connect-timeout 1 --max-time 2 "https://${webhook_svc_ip}/" >/dev/null 2>&1; do
-      attempts=$((attempts+1))
-      if (( attempts > 60 )); then
-        _warn "frr-k8s webhook never responded; applying may fail"
-        break
-      fi
-      sleep 1
-    done
+  # The validating webhook is removed by install_ovn_k_in_cluster (it is
+  # unreachable from the API server on worker nodes), so only wait on it when
+  # the configuration is still present. Probing a deleted webhook wasted up
+  # to 60s per cluster on every create.
+  local webhook_cfg
+  webhook_cfg=$(KUBECONFIG="${kubeconfig}" kubectl get validatingwebhookconfiguration \
+    frr-k8s-validating-webhook-configuration --ignore-not-found -o name 2>/dev/null || true)
+  if [[ -n "${webhook_cfg}" ]]; then
+    _log "Probing frr-k8s webhook in ${cluster_label}..."
+    local cp_node webhook_svc_ip attempts=0
+    cp_node=$(KUBECONFIG="${kubeconfig}" kubectl get nodes -l node-role.kubernetes.io/control-plane \
+      -o jsonpath='{.items[0].metadata.name}')
+    webhook_svc_ip=$(KUBECONFIG="${kubeconfig}" kubectl get svc -n "${FRR_K8S_NAMESPACE}" frr-k8s-webhook-service \
+      -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+    if [[ -n "${cp_node}" && -n "${webhook_svc_ip}" ]]; then
+      while ! podman exec "${cp_node}" \
+          curl -ksS --connect-timeout 1 --max-time 2 "https://${webhook_svc_ip}/" >/dev/null 2>&1; do
+        attempts=$((attempts+1))
+        if (( attempts > 60 )); then
+          _warn "frr-k8s webhook never responded; applying may fail"
+          break
+        fi
+        sleep 1
+      done
+    fi
   fi
 
   _log "Applying FRRConfiguration to ${cluster_label} (peering IP=${peering_ip}, AS=${site_as})..."
@@ -903,6 +966,142 @@ spec:
         disableMP: false
 EOF
   _log "FRRConfiguration applied to ${cluster_label}."
+}
+
+# ---------- MetalLB (BGP LoadBalancer VIP announcements) ----------
+
+# Install MetalLB in frr-k8s mode, reusing the standalone frr-k8s daemonset
+# (frr-k8s-system) that OVN-K RouteAdvertisements already configures.
+# frr-k8s merges FRRConfigurations from all controllers, so OVN-K pod/EVPN
+# advertisements and MetalLB service advertisements share one BGP instance
+# (and one BGP session per node) toward the provider edge.
+ensure_metallb_repo() {
+  if ! helm repo list 2>/dev/null | awk '{print $1}' | grep -qx "${METALLB_REPO_NAME}"; then
+    _log "Adding Helm repo '${METALLB_REPO_NAME}' (${METALLB_REPO_URL})..."
+    helm repo add "${METALLB_REPO_NAME}" "${METALLB_REPO_URL}" >/dev/null
+  fi
+  helm repo update "${METALLB_REPO_NAME}" >/dev/null 2>&1 || true
+}
+
+install_metallb_in_cluster() {
+  local kubeconfig="$1" label="$2"
+  _log "Installing MetalLB v${METALLB_VERSION} into '${label}' (external frr-k8s: ${FRR_K8S_NAMESPACE})..."
+  # The controller is pinned to the control-plane node: in this kind + OVN-K
+  # lab, pods on worker nodes cannot reach the kubernetes API (pod egress to
+  # the management network and ClusterIP is broken there), while pods on the
+  # control-plane can. The speaker is hostNetwork and reaches the API via the
+  # direct-endpoint patch below.
+  KUBECONFIG="${kubeconfig}" helm upgrade --install metallb "${METALLB_REPO_NAME}/metallb" \
+    --version "${METALLB_VERSION}" \
+    --namespace "${METALLB_NAMESPACE}" \
+    --create-namespace \
+    --set frrk8s.enabled=false \
+    --set frrk8s.external=true \
+    --set "frrk8s.namespace=${FRR_K8S_NAMESPACE}" \
+    --set crds.validationFailurePolicy=Ignore \
+    --set controller.nodeSelector."node-role\.kubernetes\.io/control-plane"="" \
+    --set controller.tolerations[0].key=node-role.kubernetes.io/control-plane \
+    --set controller.tolerations[0].operator=Exists \
+    --set controller.tolerations[0].effect=NoSchedule \
+    --kubeconfig "${kubeconfig}" >/dev/null
+
+  # Point both components at the API server directly (client-go in-cluster
+  # config reads KUBERNETES_SERVICE_HOST/PORT): the speaker is hostNetwork and
+  # must reach the API from worker nodes where the ClusterIP is unreachable.
+  # The validating webhook service is unreachable through the same ClusterIP,
+  # hence crds.validationFailurePolicy=Ignore above; the webhook objects stay
+  # in place because the certificate rotator reconciles their caBundle and
+  # blocks startup if they are missing.
+  local cp_node api_ip
+  cp_node=$(KUBECONFIG="${kubeconfig}" kubectl get nodes -l node-role.kubernetes.io/control-plane \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  api_ip=$(KUBECONFIG="${kubeconfig}" kubectl get node "${cp_node}" \
+    -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)
+  if [[ -n "${api_ip}" ]]; then
+    _log "Patching MetalLB API access in '${label}' to ${api_ip}:6443..."
+    KUBECONFIG="${kubeconfig}" kubectl set env deployment/metallb-controller -n "${METALLB_NAMESPACE}" \
+      KUBERNETES_SERVICE_HOST="${api_ip}" KUBERNETES_SERVICE_PORT=6443 >/dev/null
+    KUBECONFIG="${kubeconfig}" kubectl set env daemonset/metallb-speaker -n "${METALLB_NAMESPACE}" \
+      KUBERNETES_SERVICE_HOST="${api_ip}" KUBERNETES_SERVICE_PORT=6443 >/dev/null
+  else
+    _warn "Could not determine the API server IP for ${label}; MetalLB may not become ready"
+  fi
+
+  _log "Waiting for MetalLB controller and speaker in '${label}'..."
+  KUBECONFIG="${kubeconfig}" kubectl rollout status -n "${METALLB_NAMESPACE}" \
+    deployment/metallb-controller --timeout 3m \
+    || _warn "metallb-controller not ready in ${label} within 3m"
+  KUBECONFIG="${kubeconfig}" kubectl rollout status -n "${METALLB_NAMESPACE}" \
+    daemonset/metallb-speaker --timeout 3m \
+    || _warn "metallb-speaker not ready in ${label} within 3m"
+}
+
+# Apply the per-cluster VIP pool, BGP peering (to the local provider edge) and
+# advertisement. Sessions are iBGP within the site AS, matching the node
+# sessions configured by OVN-K / apply_bgp_for_cluster.
+apply_metallb_resources() {
+  local kubeconfig="$1" label="$2" pool="$3" peering_ip="$4" site_as="$5"
+  _log "Applying MetalLB pool/peer/advertisement to ${label} (pool=${pool}, edge=${peering_ip}, AS=${site_as})..."
+  KUBECONFIG="${kubeconfig}" kubectl apply -f - <<EOF
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: evpn-pool
+  namespace: ${METALLB_NAMESPACE}
+spec:
+  addresses:
+    - ${pool}
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: evpn-bgp-adv
+  namespace: ${METALLB_NAMESPACE}
+spec:
+  ipAddressPools:
+    - evpn-pool
+---
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  name: evpn-edge
+  namespace: ${METALLB_NAMESPACE}
+spec:
+  myASN: ${site_as}
+  peerASN: ${site_as}
+  peerAddress: ${peering_ip}
+  peerPort: 179
+EOF
+}
+
+# Allow the cluster's nodes to install routes for the remote site's
+# LoadBalancer VIPs learned from the edge. The filter is self-contained and
+# frr-k8s merges it into the same BGP session as the OVN-K configuration.
+apply_metallb_receive_routes() {
+  local kubeconfig="$1" label="$2" peering_ip="$3" site_as="$4" supernet="$5"
+  _log "Allowing ${label} nodes to receive VIP routes (${supernet}) from ${peering_ip}..."
+  KUBECONFIG="${kubeconfig}" kubectl apply -f - <<EOF
+---
+apiVersion: frrk8s.metallb.io/v1beta1
+kind: FRRConfiguration
+metadata:
+  name: metallb-vips
+  namespace: ${FRR_K8S_NAMESPACE}
+spec:
+  bgp:
+    routers:
+    - asn: ${site_as}
+      neighbors:
+      - address: ${peering_ip}
+        asn: ${site_as}
+        port: 179
+        toReceive:
+          allowed:
+            prefixes:
+            - prefix: ${supernet}
+              le: 32
+EOF
 }
 
 # ---------- EVPN stretched L2 (VTEP + CUDN + RouteAdvertisements) ----------
@@ -1087,6 +1286,9 @@ cmd_status() {
       [[ -f "${kc}" ]] || kc="${HOME}/.kube/config"
       KUBECONFIG="${kc}" kubectl get vtep,cudn,routeadvertisements,frrconfiguration -A -o wide 2>/dev/null | sed 's/^/  /' \
         || echo "  (kubectl failed)"
+      _log "=== ${c} MetalLB and LoadBalancer services ==="
+      KUBECONFIG="${kc}" kubectl get ipaddresspool,bgppeer,bgpadvertisement -n "${METALLB_NAMESPACE}" 2>/dev/null | sed 's/^/  /' || true
+      KUBECONFIG="${kc}" kubectl get svc -A --field-selector spec.type=LoadBalancer 2>/dev/null | sed 's/^/  /' || true
     fi
   done
 }
@@ -1094,12 +1296,13 @@ cmd_status() {
 # ---------- Subcommands ----------
 
 cmd_create() {
-  local skip_evpn=0
+  local skip_evpn=0 skip_metallb=0
   local arg
   for arg in "$@"; do
-    if [[ "${arg}" == "--skip-evpn" ]]; then
-      skip_evpn=1
-    fi
+    case "${arg}" in
+      --skip-evpn) skip_evpn=1 ;;
+      --skip-metallb) skip_metallb=1 ;;
+    esac
   done
 
   check_deps full
@@ -1127,6 +1330,25 @@ cmd_create() {
   deploy_provider_edge
   apply_bgp_for_cluster "${KUBECONFIG_C1}" "${CLUSTER1_NAME}" "${EDGE1_SITE_IP}" "${SITE1_AS}"
   apply_bgp_for_cluster "${KUBECONFIG_C2}" "${CLUSTER2_NAME}" "${EDGE2_SITE_IP}" "${SITE2_AS}"
+  wait_for_edge_convergence
+
+  # MetalLB — BGP service (LoadBalancer VIP) announcements over the same
+  # frr-k8s instance / edge sessions used by OVN-K.
+  if [[ "${INSTALL_METALLB}" == "1" && "${skip_metallb}" -eq 0 ]]; then
+    ensure_metallb_repo
+    install_metallb_in_cluster "${KUBECONFIG_C1}" "${CLUSTER1_NAME}"
+    install_metallb_in_cluster "${KUBECONFIG_C2}" "${CLUSTER2_NAME}"
+    apply_metallb_resources "${KUBECONFIG_C1}" "${CLUSTER1_NAME}" \
+      "${METALLB_POOL_C1}" "${EDGE1_SITE_IP}" "${SITE1_AS}"
+    apply_metallb_resources "${KUBECONFIG_C2}" "${CLUSTER2_NAME}" \
+      "${METALLB_POOL_C2}" "${EDGE2_SITE_IP}" "${SITE2_AS}"
+    apply_metallb_receive_routes "${KUBECONFIG_C1}" "${CLUSTER1_NAME}" \
+      "${EDGE1_SITE_IP}" "${SITE1_AS}" "${METALLB_VIP_SUPERNET}"
+    apply_metallb_receive_routes "${KUBECONFIG_C2}" "${CLUSTER2_NAME}" \
+      "${EDGE2_SITE_IP}" "${SITE2_AS}" "${METALLB_VIP_SUPERNET}"
+  else
+    _log "Skipping MetalLB setup (INSTALL_METALLB=0 or --skip-metallb)."
+  fi
 
   # Wire up the EVPN stretched L2 fabric (VTEP, CUDN, RouteAdvertisements)
   if [[ "${skip_evpn}" -eq 0 ]]; then
@@ -1148,6 +1370,7 @@ cmd_create() {
 
 cmd_destroy() {
   check_deps minimal
+  destroy_ui
   destroy_provider_edge
   for c in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
     _kind_delete "${c}"
@@ -1185,11 +1408,12 @@ cmd_start() {
       _die "Kind cluster '${c}' not found. Run 'create' first."
     fi
   done
+  wait_for_edge_convergence
   _log "✅ Started. BGP sessions will re-establish within ~30s."
 }
 
 cmd_help() {
-  sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,58p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   echo
   echo "  ui build     Build the evpn-ui container image"
   echo "  ui start     Start the evpn-ui container (port 8080)"
@@ -1204,6 +1428,16 @@ UI_IMAGE="${UI_IMAGE:-evpn-ui:latest}"
 UI_CONTAINER="${UI_CONTAINER:-evpn-ui}"
 UI_PORT="${UI_PORT:-8080}"
 UI_DOCKERFILE="${SCRIPT_DIR}/ui/Dockerfile"
+
+# Remove the UI container. Called from destroy before the podman networks are
+# removed: the UI is attached to all of them and would otherwise keep them
+# alive (and block a later create from recreating them).
+destroy_ui() {
+  if podman container exists "${UI_CONTAINER}" 2>/dev/null; then
+    _log "Removing UI container '${UI_CONTAINER}'..."
+    podman rm -f "${UI_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+}
 
 cmd_ui() {
   local ui_cmd="${1:-start}"

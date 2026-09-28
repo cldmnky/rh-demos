@@ -22,6 +22,11 @@ This is a mono-repository designed to host multiple distinct Red Hat demo module
     - Test VMware: `gitops-vmware-virt-demo/scripts/cleanup.sh && gitops-vmware-virt-demo/demo/test-flow.sh`
     - Test ROSA: `gitops-vmware-virt-demo/scripts/cleanup.sh && gitops-vmware-virt-demo/demo/test-flow-rosa.sh`
     - Cleanup only: `gitops-vmware-virt-demo/scripts/cleanup.sh`
+  - **EVPN Stretched L2 Demo (v2):**
+    - Provision infra: `evpn/clusters-v2.sh create` (long; pulls images + installs OVN-K/frr-k8s/MetalLB)
+    - Headless test: `evpn/demo/test-flow-v2.sh`
+    - Tear down: `evpn/clusters-v2.sh destroy`
+    - Interactive demo (do NOT run non-interactively): `evpn/demo/demo-v2.sh`
 
 ---
 

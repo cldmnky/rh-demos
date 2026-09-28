@@ -3,7 +3,8 @@
 #
 # Fails closed on: tracked runtime kubeconfigs, transit eBGP + L2VPN-EVPN
 # session state, Type-2 route propagation to both edges, workload readiness,
-# cross-cluster ping, and ARP resolution.
+# cross-cluster ping, ARP resolution, and (MetalLB) cross-site LoadBalancer
+# VIP announcement + reachability.
 #
 # Run from repo root:
 #   ./evpn/demo/test-flow-v2.sh
@@ -51,16 +52,20 @@ echo "Runtime kubeconfigs are untracked."
 # 1. Reset
 log "1. Resetting previous resources..."
 kubectl-c1 delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=30s >/dev/null 2>&1 &
+kubectl-c1 delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=30s >/dev/null 2>&1 &
 kubectl-c1 delete vtep,cudn,ra --all --timeout=30s >/dev/null 2>&1 &
 kubectl-c2 delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=30s >/dev/null 2>&1 &
+kubectl-c2 delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=30s >/dev/null 2>&1 &
 kubectl-c2 delete vtep,cudn,ra --all --timeout=30s >/dev/null 2>&1 &
 wait
 
 # Wait for namespaces to be fully gone from both clusters (Kubernetes deletes them asynchronously)
 for kc in "${KUBECONFIG_C1}" "${KUBECONFIG_C2}"; do
-  while kubectl --kubeconfig="${kc}" get ns vm-workloads >/dev/null 2>&1; do
-    echo "Waiting for namespace vm-workloads to be completely deleted on cluster..."
-    sleep 2
+  for ns in vm-workloads l3-services; do
+    while kubectl --kubeconfig="${kc}" get ns "${ns}" >/dev/null 2>&1; do
+      echo "Waiting for namespace ${ns} to be completely deleted on cluster..."
+      sleep 2
+    done
   done
 done
 
@@ -205,9 +210,11 @@ contains_ip() {
   grep -Eq "(^|[^0-9.])${ip_re}([^0-9.]|$)" <<<"$2"
 }
 
-# Both edges must carry Type-2 routes for both workload CUDN IPs.
+# Both edges must carry Type-2 routes for both workload CUDN IPs. The window
+# is generous because a cold start (or a freshly recreated pod) can coincide
+# with the edges' BGP session re-establishing and re-advertising all routes.
 assert_type2_routes() {
-  local deadline=$(( $(date +%s) + 90 ))
+  local deadline=$(( $(date +%s) + 240 ))
   local edge1_routes edge2_routes missing ip
   while true; do
     edge1_routes=$(podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type macip' 2>/dev/null || true)
@@ -237,9 +244,82 @@ log "10. Performing cross-cluster ping VM-A ↔ VM-B (across isolated networks).
 kubectl-c1 exec vm-a -n vm-workloads -- ping -c 4 "${VM_B_IP}"
 kubectl-c2 exec vm-b -n vm-workloads -- ping -c 4 "${VM_A_IP}"
 
-# 11. Verify ARP Resolution
+# 11. Verify ARP Resolution (retry: the cache entry may take a moment to appear)
 log "11. Verifying local ARP resolution..."
-kubectl-c1 exec vm-a -n vm-workloads -- arp -a | grep -q "${VM_B_IP}"
+deadline=$(( $(date +%s) + 30 ))
+while true; do
+  if kubectl-c1 exec vm-a -n vm-workloads -- arp -a 2>/dev/null | grep -q "${VM_B_IP}"; then
+    break
+  fi
+  if [[ $(date +%s) -gt "${deadline}" ]]; then
+    echo "Error: ${VM_B_IP} not present in vm-a ARP table within 30s"
+    kubectl-c1 exec vm-a -n vm-workloads -- arp -a 2>&1 || true
+    exit 1
+  fi
+  sleep 2
+done
 echo "ARP checks passed. ${VM_B_IP} resolved successfully on vm-a."
 
-log "✅ All tests PASSED. Stretched EVPN L2 connectivity verified across isolated networks with eBGP transit."
+# 12. Deploy the MetalLB BGP service and wait for its VIP
+log "12. Deploying the MetalLB BGP service (${MANIFESTS_DIR}/l3-service.yaml)..."
+kubectl-c1 apply -f "${MANIFESTS_DIR}/l3-service.yaml" >/dev/null
+kubectl-c1 wait --for=condition=Available deployment/web -n l3-services --timeout=90s
+
+VIP=""
+deadline=$(( $(date +%s) + 90 ))
+while true; do
+  VIP=$(kubectl-c1 get svc web -n l3-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  [[ -n "${VIP}" ]] && break
+  if [[ $(date +%s) -gt "${deadline}" ]]; then
+    echo "Error: service web did not receive a LoadBalancer IP within 90s"
+    exit 1
+  fi
+  sleep 3
+done
+echo "MetalLB assigned VIP: ${VIP}"
+
+# 13. Verify the VIP in both edges' IPv4 unicast RIBs. On edge2 the route must
+# have arrived over the eBGP transit (AS 65001).
+log "13. Verifying VIP ${VIP}/32 in the edges' IPv4 unicast RIBs..."
+assert_vip_on_edge() {
+  local edge="$1" vip="$2" require_as="$3"
+  local deadline=$(( $(date +%s) + 90 )) out
+  while true; do
+    out=$(podman exec "${edge}" vtysh -c "show bgp ipv4 unicast ${vip}/32" 2>/dev/null || true)
+    if contains_ip "${vip}" "${out}" \
+       && { [[ -z "${require_as}" ]] || grep -Eq '(^|[^0-9])'"${require_as}"'([^0-9]|$)' <<<"${out}"; }; then
+      break
+    fi
+    if [[ $(date +%s) -gt "${deadline}" ]]; then
+      echo "Error: VIP ${vip}/32 not present on ${edge} (require_as=${require_as:-none}) within 90s"
+      exit 1
+    fi
+    sleep 3
+  done
+  echo "  ${edge}: ${vip}/32 present${require_as:+ (AS path contains ${require_as})}"
+}
+assert_vip_on_edge evpn-edge1 "${VIP}" ""
+assert_vip_on_edge evpn-edge2 "${VIP}" "65001"
+
+# 14. Reach the VIP cross-site from a host-network client on cluster2.
+# The client runs with hostNetwork so the request is routed purely by BGP
+# (node FIB -> edge2 -> eBGP transit -> edge1 -> cluster1 node); pods on the
+# EVPN CUDN cannot reach default-network service VIPs (network isolation).
+log "14. Curling the remote site VIP from a host-network client on cluster2..."
+kubectl-c2 delete pod vip-client -n l3-services --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
+sed "s/__VIP__/${VIP}/" "${MANIFESTS_DIR}/l3-client.yaml" | kubectl-c2 apply -f - >/dev/null
+deadline=$(( $(date +%s) + 90 ))
+while true; do
+  if kubectl-c2 logs vip-client -n l3-services 2>/dev/null | grep -q 'VIP-OK'; then
+    break
+  fi
+  if [[ $(date +%s) -gt "${deadline}" ]]; then
+    echo "Error: cluster2 host-network client could not reach http://${VIP}:8080/hostname within 90s"
+    kubectl-c2 logs vip-client -n l3-services 2>/dev/null || true
+    exit 1
+  fi
+  sleep 3
+done
+echo "BGP service reachability verified: ${VIP} reachable from cluster2 over eBGP transit."
+
+log "✅ All tests PASSED. Stretched EVPN L2 connectivity verified across isolated networks with eBGP transit and MetalLB BGP services."

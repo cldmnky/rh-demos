@@ -7,7 +7,8 @@
 #   2. BGP EVPN Session Status (eBGP transit between sites)
 #   3. Workload Deployment (vm-a / vm-b)
 #   4. Cross-Cluster L2 Connectivity (ARP & Ping)
-#   5. Web UI Live Visualization
+#   5. MetalLB BGP Services (LoadBalancer VIP over the eBGP transit)
+#   6. Web UI Live Visualization
 #
 # Run from repo root:
 #   ./evpn/demo/demo-v2.sh
@@ -101,15 +102,19 @@ fi
 # Pre-flight Reset (Silently reset active EVPN config to pristine starting state)
 echo -e "${GREY}Pre-flight: Cleaning up existing EVPN resources...${COLOR_RESET}"
 KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
+KUBECONFIG="${KUBECONFIG_C1}" kubectl delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C1}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete ns vm-workloads --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
+KUBECONFIG="${KUBECONFIG_C2}" kubectl delete ns l3-services --ignore-not-found --grace-period=0 --force --timeout=15s >/dev/null 2>&1 &
 KUBECONFIG="${KUBECONFIG_C2}" kubectl delete vtep,cudn,ra --all --timeout=15s >/dev/null 2>&1 &
 
 # Wait for namespaces to be fully gone from both clusters (Kubernetes deletes them asynchronously)
 for kc in "${KUBECONFIG_C1}" "${KUBECONFIG_C2}"; do
-    while KUBECONFIG="${kc}" kubectl get ns vm-workloads >/dev/null 2>&1; do
-        echo "Waiting for namespace vm-workloads to be completely deleted on cluster..."
-        sleep 2
+    for ns in vm-workloads l3-services; do
+        while KUBECONFIG="${kc}" kubectl get ns "${ns}" >/dev/null 2>&1; do
+            echo "Waiting for namespace ${ns} to be completely deleted on cluster..."
+            sleep 2
+        done
     done
 done
 
@@ -124,7 +129,8 @@ redhatsay '**EVPN Multi-Cluster Stretched L2 Demo**
 
 Two Kubernetes clusters
 on isolated podman networks
-connected via BGP EVPN and eBGP transit'
+connected via BGP EVPN and eBGP transit
+— plus cross-site BGP services with MetalLB'
 wait
 clear
 p ""
@@ -476,11 +482,110 @@ clear
 redhatsay '**Ping works across isolated networks!**
 
 VM-A ↔ VM-B over the EVPN overlay'
+wait
+clear
 
 # ==============================================================
-# ACT 6 — Web UI Visualization
+# ACT 6 — MetalLB BGP Services
 # ==============================================================
-act "6" "Live Real-Time Web Visualization"
+act "6" "Cross-Site Services with MetalLB (BGP)"
+
+say "The stretched L2 segment carried pod traffic. Now let's advertise a
+Kubernetes LoadBalancer Service across the SAME BGP fabric using MetalLB.
+
+MetalLB runs in FRR-K8s mode and shares the existing frr-k8s daemon with
+OVN-Kubernetes: both controllers publish FRRConfiguration objects, and
+frr-k8s merges them into a single FRR instance per node — one BGP session
+per node, two independent consumers.
+
+VIP pools (announced into BGP):
+  Cluster 1 → 192.170.2.100-149
+  Cluster 2 → 192.170.2.150-199"
+wait
+
+comment "MetalLB peering at the local provider edge (iBGP, site AS)..."
+pe "kubectl-c1 get bgppeer,ipaddresspool,bgpadvertisement -n metallb-system"
+wait
+
+comment "Deploying a web service and requesting a LoadBalancer..."
+show_manifest "${MANIFESTS_DIR}/l3-service.yaml"
+pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/l3-service.yaml"
+pe "kubectl-c1 wait --for=condition=Available deployment/web -n l3-services --timeout=60s"
+pe "kubectl-c1 get svc -n l3-services"
+wait
+
+say "MetalLB assigned the VIP and the node's FRR announced it to edge1 over
+the node's existing iBGP session. Edge1 redistributed it over the eBGP
+transit to edge2, which reflected it to the cluster2 nodes.
+Let's verify on both edges."
+wait
+
+# Extract the assigned VIP
+VIP=""
+for _ in $(seq 1 30); do
+    VIP=$(KUBECONFIG="${KUBECONFIG_C1}" kubectl get svc web -n l3-services -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+    [[ -n "${VIP}" ]] && break
+    sleep 2
+done
+
+if [[ -z "${VIP}" ]]; then
+    echo -e "${RED}Error: no LoadBalancer VIP was assigned. Is MetalLB running? (./evpn/clusters-v2.sh create)${COLOR_RESET}"
+    exit 1
+fi
+
+comment "Edge1 (AS 65001): VIP learned from the cluster1 node via iBGP..."
+pe "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
+wait
+
+comment "Edge2 (AS 65002): the same VIP arrived over the eBGP transit from AS 65001..."
+pe "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
+wait
+
+say "Finally, request the service from the other site. We use a host-network
+client on cluster2 so the request is routed purely by BGP:
+  node FIB → edge2 → eBGP transit → edge1 → cluster1 node
+where OVN-K's LoadBalancer DNATs it to the backend pod.
+
+The stretched-L2 pods themselves cannot reach default-network service VIPs —
+the EVPN transport isolates that network. Two independent data paths:
+L2 overlay for pod-to-pod, L3 BGP for service VIPs."
+wait
+
+comment "Deploying the client on cluster2 (host network — no L2 stretch)..."
+show_manifest "${MANIFESTS_DIR}/l3-client.yaml"
+pe "sed 's|__VIP__|${VIP}|' ${MANIFESTS_DIR}/l3-client.yaml | kubectl-c2 apply -f -"
+wait
+
+# Wait (silently) for the client to report a result
+CLIENT_OK=0
+for _ in $(seq 1 30); do
+    if KUBECONFIG="${KUBECONFIG_C2}" kubectl logs vip-client -n l3-services 2>/dev/null | grep -q 'VIP-OK'; then
+        CLIENT_OK=1
+        break
+    fi
+    sleep 2
+done
+if [[ "${CLIENT_OK}" -eq 0 ]]; then
+    echo -e "${RED}Error: cluster2 client could not reach the VIP${COLOR_RESET}"
+    exit 1
+fi
+
+comment "Reading the client result..."
+pe "kubectl-c2 logs vip-client -n l3-services"
+wait
+clear
+
+redhatsay '**One BGP fabric, two consumers**
+
+OVN-K EVPN pods  +  MetalLB service VIPs
+sharing one FRR instance and one session per node'
+wait
+clear
+
+# ==============================================================
+# ACT 7 — Web UI Visualization
+# ==============================================================
+act "7" "Live Real-Time Web Visualization"
 
 say "Let's open our live visualization dashboard at http://localhost:8080.
 We will see:
@@ -499,8 +604,9 @@ fi
 wait
 
 say "Demo complete! You have successfully demonstrated OVN-K Stretched L2 EVPN
-across isolated networks with eBGP transit."
+across isolated networks with eBGP transit — and cross-site BGP services
+announced by MetalLB over the same fabric."
 
-redhatsay '**EVPN Stretched L2 — that'\''s how it works!**
+redhatsay '**EVPN Stretched L2 + BGP Services — that'\''s how it works!**
 
-OVN-Kubernetes  BGP EVPN  eBGP transit'
+OVN-Kubernetes  BGP EVPN  eBGP transit  MetalLB'

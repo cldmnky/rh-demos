@@ -3,7 +3,9 @@
 End-to-end demo that stretches a Layer-2 network across two independent
 kind clusters using **OVN-Kubernetes BGP EVPN**. Each cluster lives on its
 own podman site network with a local FRR provider edge; the two edges peer
-over a dedicated eBGP transit network.
+over a dedicated eBGP transit network. **MetalLB** runs against the same
+frr-k8s instance and announces Kubernetes `LoadBalancer` service VIPs across
+the same eBGP fabric — one BGP session per node, two consumers.
 
 ```
    Site 1 — AS 65001                            Site 2 — AS 65002
@@ -18,6 +20,8 @@ over a dedicated eBGP transit network.
    ├──────────────────────┤                     ├──────────────────────┤
    │ frr-k8s (BGP+EVPN)   │                     │ frr-k8s (BGP+EVPN)   │
    │ rawConfig: VNI 110   │                     │ rawConfig: VNI 110   │
+   │ + MetalLB VIPs       │                     │ + MetalLB VIPs       │
+   │   192.170.2.100-149  │                     │   192.170.2.150-199  │
    └──────────┬───────────┘                     └──────────┬───────────┘
               │ iBGP (AS 65001)                           │ iBGP (AS 65002)
               ▼                                           ▼
@@ -33,11 +37,12 @@ over a dedicated eBGP transit network.
 
 | Component | Description |
 |-----------|-------------|
-| **2 kind clusters** | Kubernetes v1.32.0, each with 1 control-plane + 1 worker |
+| **2 kind clusters** | Kubernetes v1.34.3, each with 1 control-plane + 1 worker |
 | **3 podman networks** | `evpn-site1` (10.100.0.0/24), `evpn-site2` (10.200.0.0/24) and `evpn-transit` (10.250.0.0/24); the shared `kind` network stays for management (API server, image pull) |
 | **OVN-Kubernetes** | Helm-installed from source, EVPN + RouteAdvertisements enabled |
-| **frr-k8s** | Metallb FRR-K8s v0.0.21, per-node BGP/EVPN daemon |
-| **2 FRR edge containers** | quay.io/frrouting/frr:10.1.0; iBGP route reflector for their own site (AS 65001 / AS 65002) and eBGP transit speaker between sites |
+| **frr-k8s** | Metallb FRR-K8s v0.0.25, per-node BGP/EVPN daemon |
+| **MetalLB** | v0.16.1 in FRR-K8s mode (`frrk8s.external`), sharing the frr-k8s instance with OVN-K for BGP `LoadBalancer` VIP announcements |
+| **2 FRR edge containers** | quay.io/frrouting/frr:10.4.3; iBGP route reflector for their own site (AS 65001 / AS 65002) and eBGP transit speaker between sites |
 | **Stretched L2 CUDN** | VNI 110, subnet 192.170.1.0/24, EVPN transport |
 | **SVD data plane** | Single VXLAN Device per cluster — Linux bridge + VXLAN + VLAN |
 
@@ -54,6 +59,12 @@ cluster1 nodes ──iBGP (AS 65001)── evpn-edge1 ──eBGP (65001 ↔ 6500
   families.
 - EVPN route propagation path: cluster1 node → edge1 (iBGP) → edge2 (eBGP,
   transit) → cluster2 node, and symmetrically in the other direction.
+- **BGP services path** (MetalLB): backend service VIP (e.g. 192.170.2.100)
+  → local node frr-k8s (iBGP) → edge1 → edge2 (eBGP transit, AS path
+  65001) → cluster2 nodes. Nodes install the VIP route because the MetalLB
+  setup adds a `toReceive` prefix filter for the VIP supernet; edges rewrite
+  the next hop to their site IP (`next-hop-self` on the iBGP client group)
+  so the routes are resolvable inside each isolated site network.
 
 ## 4 OVN-K Resources Wired Together
 
@@ -77,15 +88,19 @@ and `advertise-all-vni`.
 ## Prerequisites
 
 - macOS or Linux with:
-  - `kind` v0.27+ (with podman provider)
+  - `kind` v0.31+ (with podman provider; v0.31.0 ships the v1.34.3 node image)
   - `podman` (machine running, `podman machine start`)
-  - `kubectl`, `helm`, `git`, `curl`
+  - `kubectl`, `helm`, `git`, `curl`, `python3` (test/demo scripts parse JSON)
+  - GNU `timeout` (Linux has it; on macOS `brew install coreutils`) — optional,
+    the OVN-K image pull skips the timeout guard when it is missing
+  - `gum` (interactive presentation), plus optional `bat` / `redhatsay`
 - Free disk space: ~15 GB for OVN-K image + kind cluster images
 
 ## Quick Start
 
 ```bash
-# Create everything (site/transit networks, clusters, OVN-K, edges, EVPN fabric)
+# Create everything (site/transit networks, clusters, OVN-K, edges, EVPN fabric,
+# MetalLB BGP services)
 ./evpn/clusters-v2.sh create
 
 # Check status
@@ -105,11 +120,15 @@ and `advertise-all-vni`.
 ./evpn/clusters-v2.sh ui start      # → http://localhost:8080
 ```
 
+`create` also accepts `--skip-evpn` (skip the stretched L2 fabric) and
+`--skip-metallb` (skip MetalLB), or set `INSTALL_METALLB=0`.
+
 ### Headless verification and demo
 
 ```bash
 # Full end-to-end check against running clusters; fails closed on tracked
-# kubeconfigs, transit BGP/EVPN session state, and Type-2 route propagation
+# kubeconfigs, transit BGP/EVPN session state, Type-2 route propagation,
+# cross-cluster ping/ARP, and MetalLB VIP announcement + reachability
 ./evpn/demo/test-flow-v2.sh
 
 # Interactive presentation
@@ -147,7 +166,7 @@ metadata:
 spec:
   containers:
   - name: netexec
-    image: registry.k8s.io/e2e-test-images/agnhost:2.45
+    image: registry.k8s.io/e2e-test-images/agnhost:2.66.1
     command: ["sleep", "infinity"]
   nodeSelector:
     kubernetes.io/hostname: evpn-cluster1-worker
@@ -163,7 +182,7 @@ metadata:
 spec:
   containers:
   - name: netexec
-    image: registry.k8s.io/e2e-test-images/agnhost:2.45
+    image: registry.k8s.io/e2e-test-images/agnhost:2.66.1
     command: ["sleep", "infinity"]
   nodeSelector:
     kubernetes.io/hostname: evpn-cluster2-worker
@@ -239,6 +258,93 @@ not coordinate address assignment.
 The v2 headless test recreates `vm-b` if both workloads land on the same
 IP, and fails if a unique allocation cannot be reached.
 
+## BGP Services with MetalLB
+
+`clusters-v2.sh create` installs **MetalLB v0.16.1** into both clusters in
+FRR-K8s mode, deliberately **reusing the existing frr-k8s daemonset**
+(`frr-k8s-system`) rather than deploying its own copy:
+
+```
+OVN-K RouteAdvertisements ─┐
+                           ├─ FRRConfiguration objects ─ frr-k8s (one per node) ─ iBGP ─ provider edge
+MetalLB BGPPeer/BGPAdv    ─┘
+```
+
+Why this works: frr-k8s merges all `FRRConfiguration` objects that select a
+node. OVN-K advertises pod/EVPN networks, MetalLB advertises service VIPs,
+and both share one FRR instance, one BGP router and one session per node
+toward the provider edge. Nothing about the EVPN fabric changes.
+
+What `create` applies per cluster:
+
+| Resource | Cluster 1 | Cluster 2 |
+|----------|-----------|-----------|
+| `IPAddressPool` (`evpn-pool`) | `192.170.2.100-192.170.2.149` | `192.170.2.150-192.170.2.199` |
+| `BGPPeer` (`evpn-edge`) | `10.100.0.100`, AS 65001 (iBGP) | `10.200.0.100`, AS 65002 (iBGP) |
+| `BGPAdvertisement` | `evpn-bgp-adv` (all peers) | `evpn-bgp-adv` (all peers) |
+| `FRRConfiguration` (`metallb-vips`) | accepts `192.170.2.0/24 le 32` from edge1 | accepts `192.170.2.0/24 le 32` from edge2 |
+
+The `metallb-vips` configuration is what lets the **nodes** install VIP
+routes announced by the remote site. The edges additionally rewrite the
+next hop of reflected routes to their own site IP (`neighbor ovn
+next-hop-self` for IPv4 unicast), so the routes resolve inside each site
+network even though the eBGP transit is not reachable from the nodes.
+
+Two kind-lab specifics worth knowing:
+
+- The MetalLB **controller is pinned to the control-plane node** (chart
+  `controller.nodeSelector` + toleration): in this kind + OVN-K lab, pods on
+  worker nodes cannot reach the Kubernetes API (neither ClusterIP nor the
+  management network), while control-plane pods can. The speaker is
+  `hostNetwork` and reaches the API via `KUBERNETES_SERVICE_HOST/PORT`
+  patched to the node IP — the same pattern used for frr-k8s.
+- The MetalLB **validating webhook** is only reachable through the ClusterIP
+  (broken for the API server host), so the chart is installed with
+  `crds.validationFailurePolicy=Ignore`. The webhook objects must stay in
+  place: the controller's certificate rotator reconciles their `caBundle`
+  and blocks startup if they are deleted.
+
+### Try it
+
+```bash
+# Deploy a web service and request a LoadBalancer on cluster1
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 \
+  kubectl apply -f evpn/demo/manifests-v2/l3-service.yaml
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 \
+  kubectl get svc -n l3-services -w      # wait for EXTERNAL-IP
+
+# Announcement on the local edge (iBGP from a cluster1 node)
+podman exec evpn-edge1 vtysh -c "show bgp ipv4 unicast 192.170.2.100/32"
+
+# Learned over the eBGP transit on edge2 (AS path 65001)
+podman exec evpn-edge2 vtysh -c "show bgp ipv4 unicast 192.170.2.100/32"
+
+# Reach the VIP from the other site with a host-network client
+sed 's|__VIP__|192.170.2.100|' evpn/demo/manifests-v2/l3-client.yaml | \
+  KUBECONFIG=evpn/kubeconfig.evpn-cluster2 kubectl apply -f -
+KUBECONFIG=evpn/kubeconfig.evpn-cluster2 \
+  kubectl logs vip-client -n l3-services     # → VIP-OK
+```
+
+The client **must run with `hostNetwork: true`** (or otherwise off the
+stretched CUDN). Pods attached to a `transport: EVPN` ClusterUserDefinedNetwork
+cannot reach default-network ClusterIP/LoadBalancer services — the EVPN
+transport is an isolated L2 VPN, and off-VPN destinations are dropped by the
+UDN's logical router with ICMP unreachable. This is also why `vm-b` is not
+used as the VIP client: the L2 stretch and the BGP service path are two
+independent data planes. The host-network client also gives the BGP path a
+source IP the remote site can route back to (the node's advertised VTEP /32).
+
+OVN-Kubernetes programs `status.loadBalancer.ingress` VIPs as OVN load
+balancers on every node, so incoming VIP traffic is DNATed to the service
+backends cluster-wide; MetalLB only owns the address assignment and the BGP
+announcement. With the default `externalTrafficPolicy: Cluster` the VIP is
+announced from every eligible node (ECMP).
+
+MetalLB resources live in `metallb-system`; the address pool annotation
+(`metallb.io/address-pool`) is not needed while a single pool exists per
+cluster.
+
 ## Debugging
 
 ### Pod level — find CUDN IP and verify ARP
@@ -268,6 +374,13 @@ All resources should show `ACCEPTED: True`.
 Each edge has 3 sessions: iBGP to its cluster's 2 nodes plus the eBGP
 session to the peer edge (edge1 ↔ 10.250.0.2, edge2 ↔ 10.250.0.1).
 
+> **Data-plane check:** the edges route the VXLAN underlay between sites, so
+> `net.ipv4.ip_forward` must be `1` inside both edge containers
+> (`podman exec evpn-edge1 cat /proc/sys/net/ipv4/ip_forward`). Every
+> subcommand that (re)starts the edges enforces this, and new containers get
+> it via `--sysctl net.ipv4.ip_forward=1`. If EVPN sessions and Type-2 routes
+> all look healthy but pings blackhole, this is the first thing to check.
+
 ```bash
 # BGP session summary (iBGP site sessions + eBGP transit session)
 podman exec evpn-edge1 vtysh -c "show bgp summary"
@@ -278,6 +391,21 @@ podman exec evpn-edge1 vtysh -c "show bgp l2vpn evpn"
 
 # EVPN VNI status (local + remote VTEPs)
 podman exec evpn-edge1 vtysh -c "show evpn vni"
+```
+
+### Edge level — MetalLB service VIPs
+
+```bash
+# VIP route on the local edge (originated by a site node over iBGP)
+podman exec evpn-edge1 vtysh -c "show bgp ipv4 unicast 192.170.2.100/32"
+
+# On the remote edge it must show AS path 65001 (learned via eBGP transit)
+podman exec evpn-edge2 vtysh -c "show bgp ipv4 unicast 192.170.2.100/32"
+
+# MetalLB resources and the merged FRRConfiguration view
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get ipaddresspool,bgppeer,bgpadvertisement -n metallb-system
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get frrconfiguration -n frr-k8s-system
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl logs -n metallb-system daemonset/metallb-speaker --tail=50
 ```
 
 ### Node level — data plane devices
@@ -302,6 +430,7 @@ podman exec evpn-cluster1-control-plane bash -c "
 ```bash
 KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get pods -n ovn-kubernetes -o wide
 KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get pods -n frr-k8s-system -o wide
+KUBECONFIG=evpn/kubeconfig.evpn-cluster1 kubectl get pods -n metallb-system -o wide
 ```
 
 ## Web UI
@@ -353,12 +482,19 @@ full implementation plan at [`ui/plan.md`](ui/plan.md).
 | `EDGE2_TRANSIT_IP` | `10.250.0.2` | edge2 IP on `evpn-transit` |
 | `CUDN_VNI` | `110` | VXLAN VNI for the stretched L2 |
 | `CUDN_SUBNETS` | `192.170.1.0/24` | Subnet for the stretched CUDN |
-| `ROUTE_TARGET` | `64512:110` | EVPN route-target (auto-derived) |
+| `ROUTE_TARGET` | `64512:110` | Shared EVPN route-target imported/exported by both sites (independent of the BGP ASNs) |
 | `VTEP_CIDRS` | `10.100.0.0/16,10.200.0.0/16` | VTEP IP discovery ranges (both site networks) |
 | `EVPN_NAMESPACE` | `vm-workloads` | Namespace for stretched workloads |
-| `OVN_K_IMAGE` | `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:release-1.4` | OVN-K container image |
+| `OVN_K_IMAGE` | `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:release-1.4` | OVN-K container image (ghcr publishes branch tags only; keep paired with `OVN_K_REF`) |
 | `OVN_K_REF` | `v1.4.0` | OVN-K git ref for Helm chart; keep it compatible with `OVN_K_IMAGE` |
-| `K8S_VERSION` | `v1.32.0` | Kubernetes version for kind |
+| `K8S_VERSION` | `v1.34.3` | Kubernetes version for kind (image published with kind v0.31.0) |
+| `FRR_IMAGE` | `quay.io/frrouting/frr:10.4.3` | Provider edge FRR image (matches frr-k8s v0.0.25) |
+| `FRR_K8S_MANIFEST_URL` | `.../frr-k8s/v0.0.25/config/all-in-one/frr-k8s.yaml` | frr-k8s manifest |
+| `INSTALL_METALLB` | `1` | Install MetalLB and BGP service advertisements |
+| `METALLB_VERSION` | `0.16.1` | MetalLB Helm chart version |
+| `METALLB_POOL_C1` | `192.170.2.100-192.170.2.149` | Cluster1 LoadBalancer VIP pool |
+| `METALLB_POOL_C2` | `192.170.2.150-192.170.2.199` | Cluster2 LoadBalancer VIP pool |
+| `METALLB_VIP_SUPERNET` | `192.170.2.0/24` | VIP supernet accepted by the nodes via BGP |
 
 ## EVPN Route Types
 
@@ -391,3 +527,7 @@ AS (64512). It is preserved for comparison but is not the default.
 - [EVPN in OpenShift — Status and Roadmap (internal wiki)](https://github.com/cldmnky/openshift-llm-wiki/wiki/queries/evpn-roadmap)
 - [Home Lab Guide (internal wiki)](https://github.com/cldmnky/openshift-llm-wiki/wiki/home-lab/evpn-multicluster-l2-vm)
 - [Upstream OVN-K kind-helm.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind-helm.sh)
+- [MetalLB — BGP mode / FRR-K8s backend](https://metallb.io/concepts/bgp/)
+- [frr-k8s — merging multiple FRRConfiguration objects](https://github.com/metallb/frr-k8s)
+- [OVN-Kubernetes EVPN feature docs](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/bgp-integration/evpn.md)
+- [OVN-Kubernetes — External IP and LoadBalancer Ingress VIPs](https://github.com/openshift/ovn-kubernetes/blob/master/docs/external-ip-and-loadbalancer-ingress.md)
