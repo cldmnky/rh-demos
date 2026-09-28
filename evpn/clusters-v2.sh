@@ -647,6 +647,12 @@ install_frr_k8s() {
 # OVN-K master writes cniVersion "1.1.0" into /etc/cni/net.d/10-ovn-kubernetes.conf
 # but its own CNI plugin rejects that result version. Patch it to "1.0.0" on every
 # node and restart any system pods that got stuck during the CNI-not-ready window.
+#
+# Worker pods cannot reach the kubernetes ClusterIP (pod egress to the kind
+# management network is broken there — the OVN-K gateway uses the site network
+# as primary), while control-plane pods can. Pin CoreDNS and
+# local-path-provisioner to the control-plane so they stay Ready and DNS keeps
+# working. Same reason MetalLB controller is pinned (see install_metallb_in_cluster).
 fix_cni_version_and_system_pods() {
   local kubeconfig="$1" name="$2"
   _log "Patching CNI config cniVersion on nodes in '${name}'..."
@@ -656,6 +662,14 @@ fix_cni_version_and_system_pods() {
     podman exec "${node}" sed -i 's/"cniVersion":"1.1.0"/"cniVersion":"1.0.0"/' \
       /etc/cni/net.d/10-ovn-kubernetes.conf 2>/dev/null || true
   done < <(KUBECONFIG="${kubeconfig}" kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+
+  _log "Pinning CoreDNS and local-path-provisioner to control-plane in '${name}'..."
+  KUBECONFIG="${kubeconfig}" kubectl patch deployment coredns -n kube-system --type=strategic \
+    -p '{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/os":"linux","node-role.kubernetes.io/control-plane":""}}}}}' \
+    >/dev/null 2>&1 || _warn "Failed to pin CoreDNS to control-plane in ${name}"
+  KUBECONFIG="${kubeconfig}" kubectl patch deployment local-path-provisioner -n local-path-storage --type=strategic \
+    -p '{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/os":"linux","node-role.kubernetes.io/control-plane":""}}}}}' \
+    >/dev/null 2>&1 || _warn "Failed to pin local-path-provisioner to control-plane in ${name}"
 
   _log "Restarting system pods that may have been stuck during CNI startup..."
   KUBECONFIG="${kubeconfig}" kubectl delete pod -n kube-system -l k8s-app=kube-dns --wait=false \
