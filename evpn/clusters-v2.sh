@@ -53,11 +53,14 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null || echo "${SCRIPT_DIR}")
 
-# OVN-K source / chart
+# OVN-K source / chart. Keep these defaults as a compatible, released pair:
+# the Helm chart embeds its version into the workloads and OVN-K refuses to
+# start when that differs from the image version. Do not combine a moving
+# source ref (such as master) with a separately cached moving image tag.
 OVN_K_REPO_URL="${OVN_K_REPO_URL:-https://github.com/ovn-kubernetes/ovn-kubernetes.git}"
-OVN_K_REF="${OVN_K_REF:-master}"
+OVN_K_REF="${OVN_K_REF:-v1.4.0}"
 OVN_K_CACHE_DIR="${OVN_K_CACHE_DIR:-$HOME/.cache/evpn/ovn-kubernetes}"
-OVN_K_IMAGE="${OVN_K_IMAGE:-ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:master}"
+OVN_K_IMAGE="${OVN_K_IMAGE:-ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:release-1.4}"
 OVN_K_IMAGE_PULL_TIMEOUT="${OVN_K_IMAGE_PULL_TIMEOUT:-10m}"
 
 # Kind / podman

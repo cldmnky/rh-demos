@@ -356,8 +356,8 @@ full implementation plan at [`ui/plan.md`](ui/plan.md).
 | `ROUTE_TARGET` | `64512:110` | EVPN route-target (auto-derived) |
 | `VTEP_CIDRS` | `10.100.0.0/16,10.200.0.0/16` | VTEP IP discovery ranges (both site networks) |
 | `EVPN_NAMESPACE` | `vm-workloads` | Namespace for stretched workloads |
-| `OVN_K_IMAGE` | `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:master` | OVN-K container image |
-| `OVN_K_REF` | `master` | OVN-K git ref for helm chart |
+| `OVN_K_IMAGE` | `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-fedora:release-1.4` | OVN-K container image |
+| `OVN_K_REF` | `v1.4.0` | OVN-K git ref for Helm chart; keep it compatible with `OVN_K_IMAGE` |
 | `K8S_VERSION` | `v1.32.0` | Kubernetes version for kind |
 
 ## EVPN Route Types
