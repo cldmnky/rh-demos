@@ -6,14 +6,15 @@ let initialized = false;
 let animatedEdges = new Set();
 let currentNamespaceLayouts = { c1: {}, c2: {} };
 
+// Node & Edge positions in the expanded layout
 const POSITIONS = {
-  'evpn-cluster1-control-plane': { x: -370, y: -35 },
-  'evpn-cluster1-worker':        { x: -190, y: -35 },
-  'evpn-cluster2-control-plane': { x: 190, y: -35 },
-  'evpn-cluster2-worker':        { x: 370, y: -35 },
-  'evpn-edge1':                  { x: -280, y: 130 },
-  'evpn-edge2':                  { x: 280, y: 130 },
-  'evpn-transit':                { x: 0, y: 260 },
+  'evpn-cluster1-control-plane': { x: -440, y: 15 },
+  'evpn-cluster1-worker':        { x: -205, y: 15 },
+  'evpn-cluster2-control-plane': { x: 205, y: 15 },
+  'evpn-cluster2-worker':        { x: 440, y: 15 },
+  'evpn-edge1':                  { x: -320, y: 190 },
+  'evpn-edge2':                  { x: 320, y: 190 },
+  'evpn-transit':                { x: 0, y: 325 },
 };
 
 const COLORS = {
@@ -66,17 +67,17 @@ function initNetwork() {
 
   // Background Group Backdrops
   network.on("beforeDrawing", function (ctx) {
-    // 1. Cluster 1 (East) outer bounding box
-    drawGroupBackdrop(ctx, -485, -310, 390, 335, "Cluster 1 (East)", COLORS.c1);
+    // 1. Cluster 1 (East) outer bounding box (generous width & height)
+    drawGroupBackdrop(ctx, -565, -440, 485, 510, "Cluster 1 (East)", COLORS.c1);
 
     // 2. Cluster 2 (West) outer bounding box
-    drawGroupBackdrop(ctx, 95, -310, 390, 335, "Cluster 2 (West)", COLORS.c2);
+    drawGroupBackdrop(ctx, 80, -440, 485, 510, "Cluster 2 (West)", COLORS.c2);
 
     // 3. Draw active Namespace & UDN sub-containers inside each cluster
     drawNamespaceBackdrops(ctx);
 
     // 4. Provider Edge Core backdrop
-    drawGroupBackdrop(ctx, -380, 75, 760, 115, "Provider Edge Core (BGP EVPN)", COLORS.edge);
+    drawGroupBackdrop(ctx, -420, 130, 840, 125, "Provider Edge Core (BGP EVPN)", COLORS.edge);
 
     // 5. Transit backdrop
     drawTransitBackdrop(ctx);
@@ -131,7 +132,7 @@ function isWorkloadNode(nodeId) {
 function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
   ctx.save();
   ctx.fillStyle = color + '0a';
-  ctx.strokeStyle = color + '22';
+  ctx.strokeStyle = color + '25';
   ctx.lineWidth = 1.5;
   ctx.setLineDash([4, 4]);
 
@@ -151,9 +152,9 @@ function drawGroupBackdrop(ctx, x, y, width, height, label, color) {
   ctx.stroke();
 
   ctx.setLineDash([]);
-  ctx.fillStyle = color + 'aa';
-  ctx.font = 'bold 11px monospace';
-  ctx.fillText(label.toUpperCase(), x + 12, y + 18);
+  ctx.fillStyle = color + 'cc';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(label.toUpperCase(), x + 14, y + 22);
   ctx.restore();
 }
 
@@ -166,7 +167,7 @@ function drawTransitBackdrop(ctx) {
   ctx.lineWidth = 1.5;
   ctx.setLineDash([4, 4]);
   const r = 8;
-  const x = -200, y = 225, width = 400, height = 70;
+  const x = -230, y = 290, width = 460, height = 70;
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + width - r, y);
@@ -182,8 +183,8 @@ function drawTransitBackdrop(ctx) {
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = '#d29922aa';
-  ctx.font = 'bold 10px monospace';
-  ctx.fillText(('TRANSIT ' + topo.transit_subnet).toUpperCase(), x + 12, y + 20);
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText(('TRANSIT ' + topo.transit_subnet).toUpperCase(), x + 14, y + 22);
   ctx.restore();
 }
 
@@ -202,10 +203,10 @@ function drawNamespaceCard(ctx, box, nsName, udnInfo, theme, isMetalLB, cluster)
   ctx.save();
 
   const color = theme.color || '#8b949e';
-  const r = 6;
+  const r = 8;
 
   // 1. Box background & border
-  ctx.fillStyle = color + '0e'; // ~6% opacity tint
+  ctx.fillStyle = color + '0d'; // ~5% opacity tint
   ctx.strokeStyle = color + '44';
   ctx.lineWidth = 1.5;
   ctx.setLineDash([3, 3]);
@@ -224,45 +225,59 @@ function drawNamespaceCard(ctx, box, nsName, udnInfo, theme, isMetalLB, cluster)
   ctx.fill();
   ctx.stroke();
 
-  // 2. Header bar
+  // 2. Header banner
   ctx.setLineDash([]);
-  ctx.fillStyle = color + '1e';
+  ctx.fillStyle = color + '20';
   ctx.beginPath();
   ctx.moveTo(box.x + r, box.y);
   ctx.lineTo(box.x + box.width - r, box.y);
   ctx.quadraticCurveTo(box.x + box.width, box.y, box.x + box.width, box.y + r);
-  ctx.lineTo(box.x + box.width, box.y + 22);
-  ctx.lineTo(box.x, box.y + 22);
+  ctx.lineTo(box.x + box.width, box.y + 26);
+  ctx.lineTo(box.x, box.y + 26);
   ctx.lineTo(box.x, box.y + r);
   ctx.quadraticCurveTo(box.x, box.y, box.x + r, box.y);
   ctx.closePath();
   ctx.fill();
 
-  // 3. Header text: Namespace name
+  // 3. Header title (Left: Namespace Name)
   ctx.fillStyle = color;
-  ctx.font = 'bold 10px monospace';
-  ctx.fillText('📦 NS: ' + nsName.toUpperCase(), box.x + 8, box.y + 15);
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('📦 ' + nsName, box.x + 10, box.y + 17);
 
-  // 4. Subtitle: UDN / Network type information
+  // 4. Header badge (Right: Topology / Transport badge)
+  let badgeText = '';
+  if (udnInfo) {
+    if (udnInfo.transport === 'EVPN') {
+      badgeText = `VNI ${udnInfo.vni || 110}`;
+    } else if (udnInfo.advertised) {
+      badgeText = 'Layer2 BGP';
+    } else {
+      badgeText = udnInfo.topology || 'UDN';
+    }
+  } else if (isMetalLB) {
+    badgeText = cluster === 'c1' ? 'MetalLB VIP' : 'Client';
+  }
+  if (badgeText) {
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = color + 'ee';
+    ctx.fillText('[' + badgeText + ']', box.x + box.width - 10, box.y + 17);
+    ctx.textAlign = 'left';
+  }
+
+  // 5. Subtitle below banner: Network Name & Subnet
   ctx.fillStyle = '#8b949e';
-  ctx.font = '9px monospace';
+  ctx.font = '10px monospace';
   let subText = '';
   if (udnInfo) {
-    const topo = udnInfo.topology || 'UDN';
     const sub = (udnInfo.subnets && udnInfo.subnets.length) ? udnInfo.subnets[0] : '';
-    const tag = udnInfo.transport === 'EVPN' ? `EVPN VNI ${udnInfo.vni || 110}` : (udnInfo.advertised ? 'BGP' : '');
-    subText = `🌐 ${udnInfo.name} [${topo}${tag ? ' • ' + tag : ''}] ${sub}`;
+    subText = `🌐 ${udnInfo.name} • ${sub}`;
   } else if (isMetalLB) {
-    subText = cluster === 'c1' ? '⚡ MetalLB LoadBalancer VIP' : '⚡ Host-Network Client';
+    subText = cluster === 'c1' ? '⚡ VIP: 192.170.2.100:8080' : '⚡ BGP Transit Client';
   } else {
     subText = 'Cluster Network';
   }
-
-  const maxChars = Math.floor(box.width / 6.5);
-  if (subText.length > maxChars) {
-    subText = subText.substring(0, maxChars - 2) + '..';
-  }
-  ctx.fillText(subText, box.x + 8, box.y + 36);
+  ctx.fillText(subText, box.x + 10, box.y + 44);
 
   ctx.restore();
 }
@@ -282,93 +297,86 @@ function buildIPMap(topo) {
   return m;
 }
 
-// Compute dynamic container boxes and item centers for active namespaces
+// Compute generous container boxes and item centers for active namespaces
 function computeNamespaceLayouts(topo) {
   const layouts = { c1: {}, c2: {} };
 
   ['c1', 'c2'].forEach(cluster => {
     const nsSet = new Set();
 
-    // From UDNs
     (topo.udns || []).filter(u => u.cluster === cluster).forEach(u => {
       if (u.namespace) nsSet.add(u.namespace);
     });
 
-    // From Workloads
     (topo.workloads || []).filter(w => w.cluster === cluster).forEach(w => {
       if (w.namespace && w.namespace !== 'default') nsSet.add(w.namespace);
     });
 
-    // From MetalLB VIPs
     if (topo.bgp_services && topo.bgp_services.vips) {
       topo.bgp_services.vips.filter(v => v.cluster === cluster).forEach(v => {
         if (v.namespace) nsSet.add(v.namespace);
       });
     }
 
-    const orderC1 = ['tenant-a', 'udn-bgp', 'vm-workloads', 'l3-services'];
-    const orderC2 = ['vm-workloads', 'l3-services', 'tenant-a', 'udn-bgp'];
-    const order = cluster === 'c1' ? orderC1 : orderC2;
-
-    const sortedNs = Array.from(nsSet).sort((a, b) => {
-      const ia = order.indexOf(a) >= 0 ? order.indexOf(a) : 99;
-      const ib = order.indexOf(b) >= 0 ? order.indexOf(b) : 99;
-      return ia - ib;
-    });
-
-    const total = sortedNs.length;
+    const total = nsSet.size;
     if (total === 0) return;
 
-    const baseX = cluster === 'c1' ? -475 : 105;
-    const fullWidth = 370;
+    // Generous cluster geometry
+    const baseX = cluster === 'c1' ? -550 : 95;
+    const fullWidth = 455;
+    const colW = 220;
+    const rowH = 155;
+    const row0Y = -395;
+    const row1Y = -225;
 
-    sortedNs.forEach((nsName, idx) => {
+    Array.from(nsSet).forEach(nsName => {
       let box, center;
 
       if (cluster === 'c1') {
         if (total === 1) {
-          box = { x: baseX, y: -275, width: fullWidth, height: 185 };
-          center = { x: baseX + fullWidth / 2, y: -165 };
-        } else if (total === 2) {
-          // If 2 namespaces: if vm-workloads is one of them, put it on right (facing C2)
-          const isRight = nsName === 'vm-workloads' || (idx === 1 && !sortedNs.includes('vm-workloads'));
-          const x = isRight ? baseX + 195 : baseX;
-          box = { x: x, y: -275, width: 175, height: 185 };
-          center = { x: x + 175 / 2, y: -165 };
+          // Act 1: Single tenant namespace takes a large comfortable container
+          box = { x: baseX, y: row0Y, width: fullWidth, height: 210 };
+          center = { x: baseX + fullWidth / 2, y: row0Y + 115 };
+        } else if (total === 2 && !nsSet.has('vm-workloads') && !nsSet.has('l3-services')) {
+          // Act 2: tenant-a on left, udn-bgp on right
+          const isRight = nsName === 'udn-bgp';
+          const x = isRight ? baseX + colW + 15 : baseX;
+          box = { x: x, y: row0Y, width: colW, height: 210 };
+          center = { x: x + colW / 2, y: row0Y + 115 };
         } else {
-          // 3 or 4 namespaces: 2x2 grid
-          // Dedicated clean slots:
-          // tenant-a:     Row 0, Col 0 (Top-Left)
-          // udn-bgp:      Row 0, Col 1 (Top-Right)
-          // l3-services:  Row 1, Col 0 (Bottom-Left)
-          // vm-workloads: Row 1, Col 1 (Bottom-Right -> directly facing C2!)
+          // Full 2x2 grid for Cluster 1:
+          // Row 0, Col 0: tenant-a     (Top-Left)
+          // Row 0, Col 1: udn-bgp      (Top-Right)
+          // Row 1, Col 0: l3-services  (Bottom-Left)
+          // Row 1, Col 1: vm-workloads (Bottom-Right -> directly facing C2!)
           let row = 0, col = 0;
           if (nsName === 'tenant-a') { row = 0; col = 0; }
           else if (nsName === 'udn-bgp') { row = 0; col = 1; }
           else if (nsName === 'l3-services') { row = 1; col = 0; }
           else if (nsName === 'vm-workloads') { row = 1; col = 1; }
-          else { col = idx % 2; row = Math.floor(idx / 2); }
+          else { row = 0; col = 0; }
 
-          const w = 175, h = 88;
-          const x = baseX + col * 195;
-          const y = row === 0 ? -275 : -180;
-          box = { x, y, width: w, height: h };
-          center = { x: x + w / 2, y: y + 54 };
+          const x = baseX + col * (colW + 15);
+          const y = row === 0 ? row0Y : row1Y;
+          box = { x: x, y: y, width: colW, height: rowH };
+          center = { x: x + colW / 2, y: y + 90 };
         }
       } else {
-        // Cluster 2
-        if (total === 1) {
-          box = { x: baseX, y: -275, width: fullWidth, height: 185 };
-          center = { x: baseX + fullWidth / 2, y: -165 };
+        // Cluster 2:
+        // vm-workloads is in Col 0 (Left side -> directly facing C1 vm-workloads at row1!)
+        // l3-services is in Col 1 (Right side)
+        if (total === 1 && nsSet.has('vm-workloads')) {
+          // If only vm-workloads on C2: place it at Row 1, Col 0 so it aligns with C1 vm-workloads!
+          box = { x: baseX, y: row1Y, width: colW, height: rowH };
+          center = { x: baseX + colW / 2, y: row1Y + 90 };
+        } else if (total === 1) {
+          box = { x: baseX, y: row1Y, width: fullWidth, height: rowH };
+          center = { x: baseX + fullWidth / 2, y: row1Y + 90 };
         } else {
-          // Dedicated clean slots for C2:
-          // vm-workloads: Col 0 (Left side -> directly facing C1 vm-workloads!)
-          // l3-services:  Col 1 (Right side)
           let col = nsName === 'vm-workloads' ? 0 : 1;
-          const w = 175;
-          const x = baseX + col * 195;
-          box = { x, y: -275, width: w, height: 185 };
-          center = { x: x + w / 2, y: -165 };
+          const x = baseX + col * (colW + 15);
+          box = { x: x, y: row1Y, width: colW, height: rowH };
+          center = { x: x + colW / 2, y: row1Y + 90 };
         }
       }
 
@@ -399,35 +407,18 @@ function addClusterElementsToGraph(topo, nodes, edges) {
       const nsWls = clusterWorkloads.filter(w => w.namespace === nsName);
       const nsVIPs = clusterVIPs.filter(v => v.namespace === nsName);
 
-      const totalItems = nsWls.length + nsVIPs.length;
-
-      let itemIdx = 0;
-      function getItemPos() {
-        if (totalItems <= 1) {
-          return { x: slot.center.x, y: slot.center.y };
-        }
-        if (totalItems === 2) {
-          const offset = itemIdx === 0 ? -44 : 44;
-          itemIdx++;
-          return { x: slot.center.x + offset, y: slot.center.y };
-        }
-        const spread = Math.min(slot.box.width - 80, totalItems * 70);
-        const step = spread / (totalItems - 1);
-        const x = (slot.center.x - spread / 2) + itemIdx * step;
-        itemIdx++;
-        return { x: x, y: slot.center.y };
-      }
-
       // 1. MetalLB VIP Node (in l3-services on C1)
       nsVIPs.forEach(vip => {
-        const pos = getItemPos();
+        // Position VIP on the left inside the l3-services card
+        const x = nsWls.length > 0 ? slot.center.x - 48 : slot.center.x;
+        const y = slot.center.y;
         const svcNodeId = 'svc-' + vip.service;
 
         nodes.push({
           id: svcNodeId,
           label: `VIP ${vip.ip}\n${vip.service}:8080`,
-          x: pos.x,
-          y: pos.y,
+          x: x,
+          y: y,
           shape: 'box',
           color: { background: '#251b05', border: '#d29922' },
           font: { size: 10, color: '#f0883e', face: 'monospace', bold: true },
@@ -436,66 +427,66 @@ function addClusterElementsToGraph(topo, nodes, edges) {
           group: 'service',
         });
 
-        // Link VIP to Edge 1 (BGP Announcement route)
+        // Link VIP to Edge 1 (BGP Announcement route dropping down cleanly on the left)
         if (cluster === 'c1') {
           edges.push({
             id: 'bgp-adv-' + svcNodeId,
             from: svcNodeId,
             to: 'evpn-edge1',
-            color: { color: '#d29922aa', opacity: 0.8 },
+            color: { color: '#d29922cc', opacity: 0.8 },
             width: 2,
             dashes: [4, 4],
             label: `BGP: ${vip.ip}/32`,
-            font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+            font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace', align: 'top' },
+            smooth: { type: 'curvedCCW', roundness: 0.28 },
             title: `BGP Route: ${vip.ip}/32 announced via iBGP to edge1`,
           });
         }
       });
 
       // 2. Pod Nodes
-      nsWls.forEach(w => {
-        const pos = getItemPos();
+      nsWls.forEach((w, wIdx) => {
+        let x = slot.center.x;
+        let y = slot.center.y;
+
+        if (nsVIPs.length > 0) {
+          // If VIP is present (l3-services), place pod on the right side
+          x = slot.center.x + 48;
+        } else if (nsWls.length > 1) {
+          const offset = (wIdx - (nsWls.length - 1) / 2) * 85;
+          x = slot.center.x + offset;
+        }
+
         const podId = w.name;
-        const displayName = w.name.startsWith('web-') ? 'web' : w.name;
+        const shortName = w.name.startsWith('web-') ? 'web' : w.name;
+        const nodeRole = w.node ? (w.node.includes('worker') ? 'worker' : 'cp') : '';
+        const nodeLabel = nodeRole ? ` [${nodeRole}]` : '';
 
         nodes.push({
           id: podId,
-          label: `${displayName}\n${w.cudn_ip || w.state}`,
-          x: pos.x,
-          y: pos.y,
+          label: `${shortName}${nodeLabel}\n${w.cudn_ip || w.state}`,
+          x: x,
+          y: y,
           shape: 'box',
           color: { background: '#161b22', border: nsTheme.color },
-          font: { size: 9, color: '#e6edf3', face: 'monospace' },
+          font: { size: 10, color: '#e6edf3', face: 'monospace' },
           shapeProperties: { borderRadius: 6 },
-          title: `Pod: ${w.name}\nNamespace: ${w.namespace}\nCluster: ${w.cluster.toUpperCase()}\nIP: ${w.cudn_ip || '—'}\nMAC: ${w.mac || '—'}\nNet: ${w.network || 'default'} (${w.net_type || ''})\nNode: ${w.node || '—'}\nState: ${w.state}`,
+          title: `Pod: ${w.name}\nNamespace: ${w.namespace}\nNode: ${w.node || '—'}\nIP: ${w.cudn_ip || '—'}\nMAC: ${w.mac || '—'}\nNet: ${w.network || 'default'} (${w.net_type || ''})\nState: ${w.state}`,
           group: 'pod',
         });
 
-        // Dotted line connecting pod to host node
-        if (w.node && POSITIONS[w.node]) {
-          edges.push({
-            id: `${w.node}-${podId}`,
-            from: w.node,
-            to: podId,
-            color: { color: nsTheme.color + '55', opacity: 0.4 },
-            width: 1,
-            dashes: [3, 3],
-            title: `Hosted on ${w.node}`,
-          });
-        }
-
-        // MetalLB backend link: if pod is named 'web' in l3-services, link to svc-web
+        // MetalLB backend link: if pod is 'web' in l3-services, link to svc-web
         if (nsName === 'l3-services' && w.name.includes('web') && nsVIPs.length > 0) {
           const svcNodeId = 'svc-' + nsVIPs[0].service;
           edges.push({
             id: `dnat-${svcNodeId}-${podId}`,
             from: svcNodeId,
             to: podId,
-            color: { color: '#d2992288', opacity: 0.6 },
+            color: { color: '#d2992288', opacity: 0.7 },
             width: 1.5,
             dashes: [3, 2],
             label: 'DNAT',
-            font: { size: 8, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+            font: { size: 8, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace', align: 'top' },
             title: `Service target: DNAT VIP to backend pod ${w.name}`,
           });
         }
@@ -506,11 +497,12 @@ function addClusterElementsToGraph(topo, nodes, edges) {
             id: `client-query-${podId}`,
             from: podId,
             to: 'evpn-edge2',
-            color: { color: '#d2992288', opacity: 0.6 },
+            color: { color: '#d29922aa', opacity: 0.7 },
             width: 1.5,
             dashes: [4, 4],
             label: 'curl → VIP',
-            font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+            font: { size: 9, color: '#d29922', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace', align: 'top' },
+            smooth: { type: 'curvedCW', roundness: 0.28 },
             title: 'Cross-site BGP transit query to VIP 192.170.2.100',
           });
         }
@@ -521,11 +513,12 @@ function addClusterElementsToGraph(topo, nodes, edges) {
             id: `bgp-export-${podId}`,
             from: podId,
             to: 'evpn-edge1',
-            color: { color: '#2ea043aa', opacity: 0.7 },
+            color: { color: '#2ea043cc', opacity: 0.8 },
             width: 1.5,
             dashes: [4, 4],
             label: 'BGP: 192.170.10.0/24',
-            font: { size: 9, color: '#2ea043', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace' },
+            font: { size: 9, color: '#2ea043', strokeWidth: 2, strokeColor: '#0d1117', face: 'monospace', align: 'top' },
+            smooth: { type: 'curvedCW', roundness: 0.1 },
             title: 'BGP Route: 192.170.10.0/24 advertised into default VRF (no EVPN)',
           });
         }
@@ -534,6 +527,7 @@ function addClusterElementsToGraph(topo, nodes, edges) {
   });
 
   // 3. EVPN Stretched L2 link between vm-a (C1) and vm-b (C2)
+  // Aligned on the exact same horizontal plane with zero crossings!
   const c1VM = (topo.workloads || []).find(w => w.cluster === 'c1' && w.name.includes('vm-a') && w.state === 'Running');
   const c2VM = (topo.workloads || []).find(w => w.cluster === 'c2' && w.name.includes('vm-b') && w.state === 'Running');
 
@@ -542,19 +536,19 @@ function addClusterElementsToGraph(topo, nodes, edges) {
       id: `l2-stretch-${c1VM.name}-${c2VM.name}`,
       from: c1VM.name,
       to: c2VM.name,
-      color: { color: '#58a6ffcc', opacity: 0.9 },
+      color: { color: '#58a6ffee', opacity: 0.95 },
       width: 2.5,
       dashes: [6, 4],
       label: 'EVPN Stretched L2 (VNI 110 • 192.170.1.0/24)',
-      font: { size: 10, color: '#58a6ff', strokeWidth: 3, strokeColor: '#0d1117', face: 'monospace', align: 'center' },
-      smooth: { type: 'curvedCW', roundness: 0.08 },
+      font: { size: 10, color: '#58a6ff', strokeWidth: 3, strokeColor: '#0d1117', face: 'monospace', align: 'top' },
+      smooth: false, // Pure straight horizontal line across the center gap!
       title: 'EVPN MAC-VRF: Stretched L2 Subnet 192.170.1.0/24 (VNI 110, RT 64512:110)',
     });
   }
 
-  // 4. Invisible boundary anchors to guarantee vis-network.fit() always frames the entire topology
-  nodes.push({ id: '__anchor_tl__', x: -500, y: -320, size: 0, shape: 'dot', color: 'rgba(0,0,0,0)', hidden: false });
-  nodes.push({ id: '__anchor_br__', x: 500, y: 290, size: 0, shape: 'dot', color: 'rgba(0,0,0,0)', hidden: false });
+  // 4. Boundary anchors to guarantee vis-network.fit() frames the entire expanded canvas
+  nodes.push({ id: '__anchor_tl__', x: -580, y: -450, size: 0, shape: 'dot', color: 'rgba(0,0,0,0)', hidden: false });
+  nodes.push({ id: '__anchor_br__', x: 580, y: 380, size: 0, shape: 'dot', color: 'rgba(0,0,0,0)', hidden: false });
 }
 
 function updateGraph(topo) {
@@ -608,7 +602,7 @@ function updateGraph(topo) {
       id: 'evpn-transit',
       label: topo.transit_subnet,
       x: 0,
-      y: 260,
+      y: 325,
       shape: 'box',
       color: { background: '#1a1a1a', border: '#d29922' },
       font: { size: 10, color: '#d29922', face: 'monospace' },
