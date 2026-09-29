@@ -84,6 +84,8 @@ func (c *Collector) collect(ctx context.Context) {
 	topo.Edges = c.podmanCollector.collectEdges(ctx)
 	topo.BGP = c.frrCollector.collectBGP(ctx)
 	topo.EVPN = c.frrCollector.collectEVPN(ctx)
+	topo.Namespaces = c.k8sCollector.collectNamespaces(ctx)
+	topo.UDNs = c.k8sCollector.collectUDNs(ctx)
 	topo.Workloads = c.k8sCollector.collectWorkloads(ctx)
 	topo.BGPServiceState = c.metallbCollector.collect(ctx)
 

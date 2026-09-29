@@ -112,7 +112,11 @@ func handleDeleteWorkload(w http.ResponseWriter, r *http.Request) {
 		cpNode = "evpn-cluster2-control-plane"
 	}
 
-	cmd := []string{"kubectl", "delete", "pod", name, "-n", "vm-workloads", "--grace-period=0", "--force"}
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "vm-workloads"
+	}
+	cmd := []string{"kubectl", "delete", "pod", name, "-n", ns, "--grace-period=0", "--force"}
 	out, err := collectors.ContainerExec(r.Context(), cpNode, cmd)
 	if err != nil {
 		log.Printf("Delete workload failed on %s: %v, out: %s", cpNode, err, out)
@@ -159,8 +163,13 @@ func handlePingStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
+	fromNamespace := r.URL.Query().Get("from_namespace")
+	if fromNamespace == "" {
+		fromNamespace = "vm-workloads"
+	}
+
 	// Exec ping 10 times, interval 0.5s
-	cmd := []string{"kubectl", "exec", "-n", "vm-workloads", fromPod, "--", "ping", "-c", "10", "-i", "0.5", toIP}
+	cmd := []string{"kubectl", "exec", "-n", fromNamespace, fromPod, "--", "ping", "-c", "10", "-i", "0.5", toIP}
 
 	stream, err := collectors.ContainerExecStream(r.Context(), cpNode, cmd)
 	if err != nil {
@@ -285,7 +294,7 @@ func handleClusterResources(w http.ResponseWriter, r *http.Request) {
 	// resources and LoadBalancer services. The MetalLB part degrades to a
 	// short note instead of failing the whole diagnostics view.
 	cmd := []string{"bash", "-c",
-		`kubectl get vtep,cudn,routeadvertisements,frrconfiguration -A -o wide; ` +
+		`kubectl get vtep,udn,cudn,routeadvertisements,frrconfiguration -A -o wide; ` +
 			`echo; echo '--- MetalLB ---'; ` +
 			`kubectl get ipaddresspool,bgppeer,bgpadvertisement -n metallb-system -o wide 2>/dev/null ` +
 			`|| echo 'MetalLB not installed'; ` +

@@ -48,12 +48,43 @@ function setStatus(state) {
 }
 
 function render(topo) {
+  renderUDNs(topo.udns || [], topo.namespaces || []);
   renderWorkloads(topo.workloads || []);
   renderBGP(topo.bgp || []);
   renderEVPN(topo.evpn);
   renderBGPServices(topo.bgp_services);
   populatePingSelects(topo.workloads || []);
   drawTopology(topo);
+}
+
+function renderUDNs(udns, namespaces) {
+  const list = document.getElementById('udn-list');
+  const count = document.getElementById('udn-count');
+  if (!list || !count) return;
+
+  count.textContent = udns.length;
+
+  if (udns.length === 0) {
+    list.innerHTML = '<div class="empty">No UDNs active</div>';
+    return;
+  }
+
+  list.innerHTML = udns.map(u => `
+    <div class="udn-row" onclick="showUDNDetails('${u.name}', '${u.cluster}')" title="Click for UDN details">
+      <div class="udn-row-top">
+        <span class="cluster-badge ${u.cluster}">${u.cluster.toUpperCase()}</span>
+        <span class="ns-badge ${u.namespace || 'cluster'}">${u.namespace || 'cluster'}</span>
+        <span class="udn-name">${u.name}</span>
+        <span class="topo-badge ${u.topology}">${u.topology}</span>
+        ${u.transport === 'EVPN' ? `<span class="evpn-badge">EVPN${u.vni ? ' ' + u.vni : ''}</span>` : ''}
+        ${u.advertised ? `<span class="bgp-badge">BGP</span>` : ''}
+      </div>
+      <div class="udn-row-sub">
+        <span class="udn-subnet">${u.subnets && u.subnets.length ? u.subnets[0] : '—'}</span>
+        <span class="udn-status ${u.status}">${u.status || 'Ready'}</span>
+      </div>
+    </div>
+  `).join('');
 }
 
 function renderWorkloads(workloads) {
@@ -67,14 +98,14 @@ function renderWorkloads(workloads) {
   }
 
   list.innerHTML = workloads.map(w => `
-    <div class="row">
-      <span class="cluster-badge ${w.cluster}">${w.cluster}</span>
+    <div class="row" onclick="showWorkloadDetails('${w.name}')" title="Click for pod details">
+      <span class="cluster-badge ${w.cluster}">${w.cluster.toUpperCase()}</span>
+      <span class="ns-badge ${w.namespace}">${w.namespace}</span>
       <span class="pod-name">${w.name}</span>
       <span class="pod-ip">${w.cudn_ip || '...'}</span>
-      <span class="pod-mac">${w.mac || ''}</span>
-      <span class="pod-node">${w.node || ''}</span>
+      <span class="net-badge">${w.net_type || w.network || 'default'}</span>
       <span class="pod-state ${w.state}">${w.state}</span>
-      <button class="btn-delete" onclick="deletePod(event, '${w.cluster}', '${w.name}')" title="Delete pod">×</button>
+      <button class="btn-delete" onclick="deletePod(event, '${w.cluster}', '${w.name}', '${w.namespace}')" title="Delete pod">×</button>
     </div>
   `).join('');
 }
@@ -191,32 +222,6 @@ function vipAdChip(a) {
   return `<span class="vip-ad present" title="via ${via}, next-hop ${nh}">${a.edge} ✓ ${via}</span>`;
 }
 
-/* VIP drill-down: show the VIP /32 on both provider edges */
-function showVIPRoutes(ip) {
-  currentDrawerID = 'vip-' + ip;
-  toggleDrawer(true, `VIP ${ip} — BGP advertisement`);
-
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) { tabs.style.display = 'none'; }
-  switchDrawerTab(1);
-
-  document.getElementById('drawer-info').innerHTML = `
-    <p><strong>VIP:</strong> ${ip}/32</p>
-    <p>How each provider edge learned the prefix:</p>
-  `;
-
-  document.getElementById('drawer-fdb').textContent = 'loading edge RIBs...';
-
-  Promise.all(['evpn-edge1', 'evpn-edge2'].map(edge =>
-    fetch(`${API}/edges/${edge}/vip/${ip}`)
-      .then(r => r.ok ? r.text() : Promise.reject(new Error(r.statusText)))
-      .then(t => `===== ${edge} =====\n${t.trim() || '(no output)'}`)
-      .catch(e => `===== ${edge} =====\nerror: ${e.message}`)
-  )).then(blocks => {
-    document.getElementById('drawer-fdb').textContent = blocks.join('\n\n');
-  });
-}
-
 /* Tab Navigation */
 function switchView(view) {
   activeView = view;
@@ -230,11 +235,13 @@ function switchView(view) {
     diagView.style.display = 'none';
     topoBtn.classList.add('active');
     diagBtn.classList.remove('active');
+    toggleDrawer(false);
   } else {
     topoView.style.display = 'none';
     diagView.style.display = 'flex';
     topoBtn.classList.remove('active');
     diagBtn.classList.add('active');
+    toggleDrawer(false);
     refreshDiag();
   }
 }
@@ -301,16 +308,17 @@ function setupFormSubmit() {
 }
 
 /* Delete Workload */
-function deletePod(event, cluster, name) {
+function deletePod(event, cluster, name, namespace) {
   event.stopPropagation();
   const bypass = new URLSearchParams(window.location.search).get('bypass-confirm') === 'true';
-  if (!bypass && !confirm(`Are you sure you want to delete pod "${name}" on cluster "${cluster}"?`)) {
+  const ns = namespace || 'vm-workloads';
+  if (!bypass && !confirm(`Are you sure you want to delete pod "${name}" in namespace "${ns}" on cluster "${cluster.toUpperCase()}"?`)) {
     return;
   }
 
   showToast(`Deleting pod ${name}...`, 'info');
 
-  fetch(`${API}/workloads/${cluster}/${name}`, {
+  fetch(`${API}/workloads/${cluster}/${name}?namespace=${encodeURIComponent(ns)}`, {
     method: 'DELETE'
   })
   .then(async r => {
@@ -329,34 +337,97 @@ function deletePod(event, cluster, name) {
   });
 }
 
+function setDrawerTabsVisible(showTabs, showContent1 = false) {
+  const tabs = document.querySelector('.drawer-tabs');
+  if (tabs) tabs.style.display = showTabs ? 'flex' : 'none';
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`drawer-tab-content-${i}`);
+    if (el) {
+      if (showTabs && i === 1) {
+        el.style.display = 'block';
+        el.classList.add('active');
+      } else if (!showTabs && showContent1 && i === 1) {
+        el.style.display = 'block';
+        el.classList.add('active');
+      } else {
+        el.style.display = 'none';
+        el.classList.remove('active');
+      }
+    }
+  }
+}
+
+/* VIP drill-down: show the VIP /32 on both provider edges */
+function showVIPRoutes(ip) {
+  currentDrawerID = 'vip-' + ip;
+  toggleDrawer(true, `VIP ${ip} — BGP advertisement`);
+  setDrawerTabsVisible(false, true);
+
+  document.getElementById('drawer-info').innerHTML = `
+    <p><strong>VIP:</strong> ${ip}/32</p>
+    <p>How each provider edge learned the prefix:</p>
+  `;
+
+  document.getElementById('drawer-fdb').textContent = 'loading edge RIBs...';
+
+  Promise.all(['evpn-edge1', 'evpn-edge2'].map(edge =>
+    fetch(`${API}/edges/${edge}/vip/${ip}`)
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(r.statusText)))
+      .then(t => `===== ${edge} =====\n${t.trim() || '(no output)'}`)
+      .catch(e => `===== ${edge} =====\nerror: ${e.message}`)
+  )).then(blocks => {
+    document.getElementById('drawer-fdb').textContent = blocks.join('\n\n');
+  });
+}
+
 function showWorkloadDetails(podName) {
   currentDrawerID = podName;
-  toggleDrawer(true, `Workload: ${podName}`);
-
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) {
-    tabs.style.display = 'none';
-  }
-  switchDrawerTab(1);
+  toggleDrawer(true, `Pod: ${podName}`);
+  setDrawerTabsVisible(false);
 
   const wl = currentTopology && currentTopology.workloads
-    ? currentTopology.workloads.find(w => w.name === podName)
+    ? currentTopology.workloads.find(w => w.name === podName || podName.includes(w.name))
     : null;
 
   document.getElementById('drawer-info').innerHTML = wl ? `
     <p><strong>Pod:</strong> ${wl.name}</p>
-    <p><strong>Cluster:</strong> ${wl.cluster}</p>
+    <p><strong>Namespace:</strong> <span class="ns-badge ${wl.namespace}">${wl.namespace}</span></p>
+    <p><strong>Cluster:</strong> ${wl.cluster.toUpperCase()} (${wl.cluster === 'c1' ? 'Cluster 1 East' : 'Cluster 2 West'})</p>
     <p><strong>Node:</strong> ${wl.node || '—'}</p>
-    <p><strong>CUDN IP:</strong> ${wl.cudn_ip || '—'}</p>
-    <p><strong>MAC:</strong> ${wl.mac || '—'}</p>
-    <p><strong>State:</strong> ${wl.state}</p>
+    <p><strong>Network:</strong> ${wl.network || 'default'} <span class="topo-badge">${wl.net_type || ''}</span></p>
+    <p><strong>CUDN / Pod IP:</strong> <span class="pod-ip">${wl.cudn_ip || '—'}</span></p>
+    <p><strong>MAC Address:</strong> <code>${wl.mac || '—'}</code></p>
+    <p><strong>State:</strong> <span class="pod-state ${wl.state}">${wl.state}</span></p>
     <p><strong>Age:</strong> ${wl.age || '—'}</p>
   ` : `
     <p><strong>Pod:</strong> ${podName}</p>
     <p><em>No detailed workload info available.</em></p>
   `;
+}
 
-  document.getElementById('drawer-fdb').textContent = 'Workload detail: no FDB or neighbor data.';
+function showUDNDetails(udnName, cluster) {
+  currentDrawerID = udnName;
+  toggleDrawer(true, `UDN: ${udnName} (${cluster.toUpperCase()})`);
+  setDrawerTabsVisible(false);
+
+  const udn = currentTopology && currentTopology.udns
+    ? currentTopology.udns.find(u => u.name === udnName && u.cluster === cluster)
+    : null;
+
+  document.getElementById('drawer-info').innerHTML = udn ? `
+    <p><strong>Network Name:</strong> ${udn.name}</p>
+    <p><strong>Scope:</strong> ${udn.scope} ${udn.namespace ? '(&lt;' + udn.namespace + '&gt;)' : '(Cluster-scoped)'}</p>
+    <p><strong>Cluster:</strong> ${udn.cluster.toUpperCase()} (${udn.cluster === 'c1' ? 'Cluster 1 East' : 'Cluster 2 West'})</p>
+    <p><strong>Topology:</strong> <span class="topo-badge ${udn.topology}">${udn.topology}</span></p>
+    <p><strong>Role:</strong> ${udn.role || 'Primary'}</p>
+    <p><strong>Subnets:</strong> <code>${udn.subnets ? udn.subnets.join(', ') : '—'}</code></p>
+    <p><strong>Transport:</strong> ${udn.transport || 'Default OVN'}${udn.vni ? ' (VNI ' + udn.vni + ')' : ''}</p>
+    <p><strong>BGP Advertised:</strong> ${udn.advertised ? 'Yes (via RouteAdvertisements)' : 'No (isolated fabric)'}</p>
+    <p><strong>Status:</strong> <span class="pod-state ${udn.status}">${udn.status || 'Ready'}</span></p>
+  ` : `
+    <p><strong>Network:</strong> ${udnName}</p>
+    <p><em>No detailed UDN info available.</em></p>
+  `;
 }
 
 /* Side Drawer (Drill Down) */
@@ -374,12 +445,7 @@ function toggleDrawer(show, title = 'Details') {
 function showNodeDetails(nodeName) {
   currentDrawerID = nodeName;
   toggleDrawer(true, `${nodeName} Diagnostics`);
-  
-  // Show tabs, hide second/third tab contents, activate tab 1
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) {
-    tabs.style.display = 'flex';
-  }
+  setDrawerTabsVisible(true);
   switchDrawerTab(1);
 
   document.getElementById('drawer-info').innerHTML = `
@@ -410,10 +476,7 @@ function showNodeDetails(nodeName) {
 function showEVPNRoutes() {
   currentDrawerID = 'evpn-routes';
   toggleDrawer(true, 'EVPN Route Table');
-
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) { tabs.style.display = 'none'; }
-  switchDrawerTab(1);
+  setDrawerTabsVisible(false, true);
 
   const evpn = currentTopology && currentTopology.evpn;
   const routes = (evpn && evpn.routes) || [];
@@ -466,10 +529,7 @@ function showEVPNRoutes() {
 function showTransitDetails() {
   currentDrawerID = 'evpn-transit';
   toggleDrawer(true, 'eBGP Transit Network');
-
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) { tabs.style.display = 'none'; }
-  switchDrawerTab(1);
+  setDrawerTabsVisible(false, true);
 
   const edges = (currentTopology && currentTopology.edges) || [];
   const e1 = edges.find(e => e.name === 'evpn-edge1');
@@ -511,13 +571,7 @@ function showTransitDetails() {
 function showEdgeDetails(edgeName) {
   currentDrawerID = edgeName;
   toggleDrawer(true, `${edgeName} Routing Table`);
-
-  // Edges don't have SVD or local interfaces, so hide node-tabs 2 and 3
-  const tabs = document.querySelector('.drawer-tabs');
-  if (tabs) {
-    tabs.style.display = 'none';
-  }
-  switchDrawerTab(1);
+  setDrawerTabsVisible(false, true);
 
   const edge = ((currentTopology && currentTopology.edges) || []).find(e => e.name === edgeName);
   const as = (edge && edge.as) || '—';
@@ -577,16 +631,16 @@ function populatePingSelects(workloads) {
   fromSelect.innerHTML = '';
   toSelect.innerHTML = '';
 
-  const c1Pods = workloads.filter(w => w.cluster === 'c1');
-  const c2Pods = workloads.filter(w => w.cluster === 'c2');
+  const c1Pods = workloads.filter(w => w.cluster === 'c1' && w.cudn_ip);
+  const c2Pods = workloads.filter(w => w.cluster === 'c2' && w.cudn_ip);
 
   if (c1Pods.length === 0) {
     fromSelect.innerHTML = '<option value="">No cluster-1 pods</option>';
   } else {
     c1Pods.forEach(p => {
       const opt = document.createElement('option');
-      opt.value = `c1/${p.name}`;
-      opt.textContent = `${p.name} (c1 - ${p.cudn_ip})`;
+      opt.value = JSON.stringify({ cluster: 'c1', name: p.name, namespace: p.namespace });
+      opt.textContent = `${p.name} [${p.namespace}] (${p.cudn_ip})`;
       fromSelect.appendChild(opt);
     });
   }
@@ -597,7 +651,7 @@ function populatePingSelects(workloads) {
     c2Pods.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.cudn_ip;
-      opt.textContent = `${p.name} (c2 - ${p.cudn_ip})`;
+      opt.textContent = `${p.name} [${p.namespace}] (${p.cudn_ip})`;
       toSelect.appendChild(opt);
     });
   }
@@ -607,26 +661,37 @@ function populatePingSelects(workloads) {
 }
 
 function runPing() {
-  const fromVal = document.getElementById('ping-from').value;
+  const fromRaw = document.getElementById('ping-from').value;
   const toIP = document.getElementById('ping-to').value;
   const terminal = document.getElementById('ping-terminal');
 
-  if (!fromVal || !toIP) {
+  if (!fromRaw || !toIP) {
     showToast('Please select valid source and target pods first.', 'error');
     return;
   }
 
-  const parts = fromVal.split('/');
-  const fromCluster = parts[0];
-  const fromPod = parts[1];
+  let fromCluster = 'c1';
+  let fromPod = '';
+  let fromNs = 'vm-workloads';
 
-  terminal.textContent = `>>> Executing ping from ${fromPod} (${fromCluster}) to ${toIP} over EVPN fabric...\n`;
+  try {
+    const parsed = JSON.parse(fromRaw);
+    fromCluster = parsed.cluster;
+    fromPod = parsed.name;
+    fromNs = parsed.namespace || 'vm-workloads';
+  } catch (e) {
+    const parts = fromRaw.split('/');
+    fromCluster = parts[0];
+    fromPod = parts[1];
+  }
+
+  terminal.textContent = `>>> Executing ping from ${fromPod} [${fromNs}] to ${toIP} over network...\n`;
 
   document.querySelector('.btn-ping').disabled = true;
   const stopBtn = document.querySelector('.btn-ping-stop');
   stopBtn.disabled = false;
 
-  const url = `${API}/ping?from_cluster=${fromCluster}&from_pod=${fromPod}&to_ip=${toIP}`;
+  const url = `${API}/ping?from_cluster=${fromCluster}&from_pod=${fromPod}&from_namespace=${encodeURIComponent(fromNs)}&to_ip=${toIP}`;
   pingEventSource = new EventSource(url);
 
   pingEventSource.onmessage = function(e) {

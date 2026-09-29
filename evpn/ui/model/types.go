@@ -6,12 +6,34 @@ type Topology struct {
 	Clusters        []Cluster        `json:"clusters"`
 	Edges           []Edge           `json:"edges"`
 	Workloads       []Workload       `json:"workloads"`
+	Namespaces      []NamespaceInfo  `json:"namespaces,omitempty"`
+	UDNs            []UDNInfo        `json:"udns,omitempty"`
 	BGP             []BGPSession     `json:"bgp"`
 	EVPN            EVPNState        `json:"evpn"`
 	BGPServiceState BGPServiceState  `json:"bgp_services"`
 	RouteEvents     []RouteEvent     `json:"route_events,omitempty"`
 	TransitSubnet   string           `json:"transit_subnet,omitempty"`
 	GeneratedAt     time.Time        `json:"generated_at"`
+}
+
+type NamespaceInfo struct {
+	Cluster    string `json:"cluster"` // "c1" or "c2"
+	Name       string `json:"name"`
+	PrimaryUDN string `json:"primary_udn,omitempty"`
+}
+
+type UDNInfo struct {
+	Cluster    string   `json:"cluster"`             // "c1" or "c2"
+	Name       string   `json:"name"`                // "prod-net", "bgp-l2", "stretched-l2"
+	Namespace  string   `json:"namespace,omitempty"` // empty if cluster-scoped
+	Scope      string   `json:"scope"`               // "Namespace" or "Cluster"
+	Topology   string   `json:"topology"`            // "Layer3" or "Layer2"
+	Role       string   `json:"role"`                // "Primary" or "Secondary"
+	Subnets    []string `json:"subnets"`             // e.g. ["103.103.0.0/16"]
+	Transport  string   `json:"transport,omitempty"` // "EVPN" or ""
+	VNI        int      `json:"vni,omitempty"`       // 110
+	Advertised bool     `json:"advertised"`          // true if RouteAdvertisements attached
+	Status     string   `json:"status,omitempty"`
 }
 
 type RouteEvent struct {
@@ -57,6 +79,8 @@ type Workload struct {
 	Node      string `json:"node"`
 	CUDNIP    string `json:"cudn_ip"`
 	MAC       string `json:"mac"`
+	Network   string `json:"network,omitempty"`
+	NetType   string `json:"net_type,omitempty"`
 	State     string `json:"state"`
 	Age       string `json:"age"`
 }

@@ -151,17 +151,19 @@ header .title {
 }
 
 .side-panels {
-  width: 380px;
-  min-width: 380px;
+  width: 400px;
+  min-width: 400px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   border-left: 1px solid var(--border-color);
   background: var(--card-bg);
 }
 
 .panel {
-  flex: 1;
+  flex-shrink: 0;
+  max-height: 220px;
+  min-height: 100px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -212,11 +214,14 @@ header .title {
 .row {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: 6px 10px;
+  font-size: 11px;
   border-radius: 4px;
   margin: 1px 0;
+  white-space: nowrap;
+  gap: 6px;
   transition: background 0.2s;
+  cursor: pointer;
 }
 
 .row:hover {
@@ -225,13 +230,14 @@ header .title {
 
 .cluster-badge {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  margin-right: 8px;
-  min-width: 24px;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 22px;
   text-align: center;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .cluster-badge.c1 {
@@ -244,36 +250,190 @@ header .title {
   color: #a371f7;
 }
 
+.ns-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-family: "SF Mono", Consolas, monospace;
+  font-weight: 600;
+  background: #30363d55;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ns-badge.tenant-a {
+  background: #388bfd1a;
+  color: #58a6ff;
+  border-color: #388bfd44;
+}
+
+.ns-badge.udn-bgp {
+  background: #2ea0431a;
+  color: #3fb950;
+  border-color: #2ea04344;
+}
+
+.ns-badge.vm-workloads {
+  background: #7c3aed1a;
+  color: #bc8cff;
+  border-color: #7c3aed44;
+}
+
+.ns-badge.l3-services {
+  background: #d299221a;
+  color: #f0883e;
+  border-color: #d2992244;
+}
+
+.net-badge {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-family: "SF Mono", Consolas, monospace;
+  background: #21262d;
+  color: #8b949e;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.topo-badge {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.topo-badge.Layer3 {
+  background: #1f6feb22;
+  color: #58a6ff;
+}
+
+.topo-badge.Layer2 {
+  background: #39c5bb22;
+  color: #39c5bb;
+}
+
+.evpn-badge {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  background: #7c3aed33;
+  color: #a371f7;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.bgp-badge {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  background: #23863633;
+  color: #3fb950;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.udn-row {
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  margin: 2px 0;
+  background: var(--hover-bg);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.udn-row:hover {
+  background: #21262d;
+  transform: translateX(2px);
+}
+
+.udn-row-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.udn-row-top .udn-name {
+  font-weight: 600;
+  color: var(--text-main);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.udn-row-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+}
+
+.udn-subnet {
+  font-family: "SF Mono", Consolas, monospace;
+  color: #7ee787;
+  white-space: nowrap;
+}
+
+.udn-status {
+  font-size: 9px;
+  color: #3fb950;
+  white-space: nowrap;
+}
+
 .pod-name {
   flex: 1;
   color: var(--text-main);
-  font-weight: 500;
+  font-weight: 600;
+  min-width: 45px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pod-ip {
   font-family: "SF Mono", Consolas, monospace;
   color: #7ee787;
-  margin-right: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .pod-mac {
   font-family: "SF Mono", Consolas, monospace;
   color: var(--text-muted);
   font-size: 10px;
-  margin-right: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .pod-node {
   color: var(--text-muted);
   font-size: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .pod-state {
   font-size: 10px;
-  margin-left: 8px;
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .pod-state::before {
