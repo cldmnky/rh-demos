@@ -81,33 +81,29 @@ done
 # INTRO
 # ==============================================================
 clear
-redhatsay '**OVN-Kubernetes Multi-Tenant Networking**
+echo '**OVN-Kubernetes Multi-Tenant Networking**
 
 Isolation for tenants  •  BGP integration
-Stretched L2 for VMs and pods  •  BGP services'
+Stretched L2 for VMs and pods  •  BGP services' | gum format | redhatsay
 wait
 clear
-p ""
-pei "ls -al"
-p ""
 
-say "Growing enterprise environments need network architecture that gives
-isolation, multi-tenancy and performance — for virtual machines AND pods.
+say "Using OVN-Kubernetes for network multi-tenancy — for virtual machines AND pods.
 
-Today, on one shared BGP fabric between two isolated sites:
+Demo:
   1. Carve out an isolated tenant network (UDN) — segmentation in minutes
   2. Publish a pod network straight into BGP — no overlay, no EVPN
   3. Stretch one L2 segment across sites with BGP EVPN — VMs keep their IPs
   4. Announce LoadBalancer services across sites with MetalLB
 
-Duration: ~25 minutes. Everything you see is real state on live clusters."
+Yes, this is a live demo"
 wait
 clear
 
 # ==============================================================
 # ACT 0 — Enterprise topology baseline
 # ==============================================================
-act "0" "Baseline: Two Sites, One BGP Fabric"
+act "Baseline" "Two Sites, One BGP Fabric"
 
 say "The starting point mirrors an enterprise DC: two sites on isolated
 networks, provider edges in between, external BGP peering on a transit link.
@@ -118,21 +114,24 @@ networks, provider edges in between, external BGP peering on a transit link.
 
 No tenant networks, no stretched segments yet — just the underlay."
 wait
+clear
+viu evpn/demo/bgp.png -w 120
+wait
+clear
 
 comment "Separate site networks plus the shared transit..."
-pe "podman network ls --format 'table {{.Name}}\t{{.Driver}}' | grep -E 'NAME|evpn|kind'"
-wait
+pei "podman network ls --format 'table {{.Name}}\t{{.Driver}}' | grep -E 'NAME|evpn|kind'"
 
 comment "The edges are the only bridge between sites (site + transit addresses)..."
-pe "podman inspect evpn-edge1 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
-pe "podman inspect evpn-edge2 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
+pei "podman inspect evpn-edge1 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
+pei "podman inspect evpn-edge2 --format '{{range \$k, \$v := .NetworkSettings.Networks}}{{printf \"%s=%s \" \$k \$v.IPAddress}}{{end}}'"
 wait
 clear
 
 # ==============================================================
 # ACT 1 — Tenant isolation with a plain UDN
 # ==============================================================
-act "1" "Tenant Networks in Minutes (UDN)"
+act "Plain UDN´s" "Tenant Networks in Minutes"
 
 say "Use case one: a tenant team needs its own isolated network — for pods
 today, for VMs tomorrow. A namespace-scoped UserDefinedNetwork gives them
@@ -142,12 +141,16 @@ every other network in the cluster.
 One rule to know: the namespace must carry the primary-UDN label at creation
 time — admission policy rejects adding it later."
 wait
+clear
 
 show_manifest "${MANIFESTS_DIR}/udn-tenant.yaml"
 
+wait
+clear
+
 comment "One manifest: namespace + tenant network + first workload..."
 pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/udn-tenant.yaml"
-pe "kubectl-c1 wait --for=condition=Ready pod app-a -n tenant-a --timeout=30s"
+kubectl-c1 wait --for=condition=Ready pod app-a -n tenant-a --timeout=30s
 wait
 clear
 
@@ -158,15 +161,15 @@ name and the address can even persist across live migration."
 wait
 
 comment "Tenant address on ovn-udn1, cluster address on eth0..."
-pe "kubectl-c1 exec app-a -n tenant-a -- ip -o addr | grep -v '127.0.0.1\|::1'"
+pei "kubectl-c1 exec app-a -n tenant-a -- ip -o addr | grep -v '127.0.0.1\|::1'"
 wait
 
 comment "Egress still works — SNATed through the node gateway..."
-pe "kubectl-c1 exec app-a -n tenant-a -- ping -c 2 10.100.0.100"
+pei "kubectl-c1 exec app-a -n tenant-a -- ping -c 2 10.100.0.100"
 wait
 
 comment "But pods on the cluster network are unreachable — native isolation, no policies needed..."
-pe "DNS_IP=\$(kubectl-c1 get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}'); kubectl-c1 exec app-a -n tenant-a -- ping -c 2 -W 1 \${DNS_IP} || true"
+pei "DNS_IP=\$(kubectl-c1 get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}'); kubectl-c1 exec app-a -n tenant-a -- ping -c 2 -W 1 \${DNS_IP} || true"
 wait
 clear
 
@@ -180,7 +183,7 @@ clear
 # ==============================================================
 # ACT 2 — Publish a UDN with BGP: Layer2, no EVPN
 # ==============================================================
-act "2" "Pods Directly on BGP — No EVPN Required"
+act "UDN´s with BGP" "Pods Directly on the provider network — No EVPN Required"
 
 say "Use case two: integrate Kubernetes with the infrastructure you already
 have. A plain Layer2 ClusterUserDefinedNetwork — no EVPN transport, no VNI —
@@ -200,10 +203,10 @@ pei "kubectl-c2 apply -f ${MANIFESTS_DIR}/udn-bgp-receive.yaml"
 wait
 
 comment "Wait for the export to be accepted before deploying the consumer..."
-pe "kubectl-c1 wait --for=jsonpath='{.status.conditions[?(@.type==\"Accepted\")].status}'=True routeadvertisements/udn-bgp-ra --timeout=60s"
+kubectl-c1 wait --for=jsonpath='{.status.conditions[?(@.type==\"Accepted\")].status}'=True routeadvertisements/udn-bgp-ra --timeout=60s
 show_manifest "${MANIFESTS_DIR}/udn-bgp-pod.yaml"
 pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/udn-bgp-pod.yaml"
-pe "kubectl-c1 wait --for=condition=Ready pod udn-web -n udn-bgp --timeout=30s"
+kubectl-c1 wait --for=condition=Ready pod udn-web -n udn-bgp --timeout=30s
 wait
 clear
 
@@ -220,11 +223,11 @@ pe "kubectl-c1 exec udn-web -n udn-bgp -- ip -o addr | grep 192.170"
 wait
 
 comment "Edge1 learned the /24 from a cluster1 node over iBGP..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
+pei "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
 wait
 
 comment "Edge2 learned it over the eBGP transit (AS path 65001)..."
-pe "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
+pei "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast 192.170.10.0/24'"
 wait
 clear
 
@@ -234,13 +237,12 @@ as first-class citizens of your existing routing domain."
 wait
 
 comment "Cluster2 worker installed the pod subnet (via edge2)..."
-pe "UDN_IP=\$(kubectl-c1 exec udn-web -n udn-bgp -- ip -o addr | grep -o '192\\.170\\.10\\.[0-9]*' | head -1); kubectl-c2 exec -n frr-k8s-system \$(kubectl-c2 get pods -n frr-k8s-system -l app.kubernetes.io/component=frr-k8s --field-selector spec.nodeName=evpn-cluster2-worker -o name | head -1) -c frr -- ip route get \${UDN_IP}"
+pei "UDN_IP=\$(kubectl-c1 exec udn-web -n udn-bgp -- ip -o addr | grep -o '192\\.170\\.10\\.[0-9]*' | head -1); kubectl-c2 exec -n frr-k8s-system \$(kubectl-c2 get pods -n frr-k8s-system -l app.kubernetes.io/component=frr-k8s --field-selector spec.nodeName=evpn-cluster2-worker -o name | head -1) -c frr -- ip route get \${UDN_IP}"
 wait
 
 comment "And the pod reaches the remote site — its identity is routable..."
-pe "kubectl-c1 exec udn-web -n udn-bgp -- ping -c 3 10.200.0.3"
+pei "kubectl-c1 exec udn-web -n udn-bgp -- ping -c 3 10.200.0.3"
 wait
-clear
 
 redhatsay '**Pod IPs as BGP routes — consumable anywhere**
 
@@ -285,15 +287,15 @@ build the broadcast tree first, before any workload exists."
 wait
 
 comment "Sessions converged over the transit (note the eBGP peer)..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn summary'"
+pei "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn summary'"
 wait
 
 comment "Type-3 routes on edge1 — every worker announced as a VTEP..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type multicast'"
+pei "podman exec evpn-edge1 vtysh -c 'show bgp l2vpn evpn route type multicast'"
 wait
 
 comment "Same routes relayed to edge2 via eBGP..."
-pe "podman exec evpn-edge2 vtysh -c 'show bgp l2vpn evpn route type multicast'"
+pei "podman exec evpn-edge2 vtysh -c 'show bgp l2vpn evpn route type multicast'"
 wait
 clear
 
@@ -322,8 +324,8 @@ while moving between these sites."
 wait
 
 comment "Waiting for Ready..."
-pe "kubectl-c1 wait --for=condition=Ready pod vm-a -n vm-workloads --timeout=30s"
-pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
+kubectl-c1 wait --for=condition=Ready pod vm-a -n vm-workloads --timeout=30s
+kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s
 wait
 clear
 
@@ -333,8 +335,8 @@ recreate one."
 wait
 
 comment "Fetching CUDN IPs from the pod annotations..."
-pe "kubectl-c1 get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
-pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
+pei "kubectl-c1 get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
+pei "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 
 VM_A_IP=$(KUBECONFIG="${KUBECONFIG_C1}" kubectl get pod vm-a -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
 VM_B_IP=$(KUBECONFIG="${KUBECONFIG_C2}" kubectl get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])" 2>/dev/null | cut -d/ -f1)
@@ -343,7 +345,7 @@ if [[ -n "${VM_A_IP}" && "${VM_A_IP}" == "${VM_B_IP}" ]]; then
     pe "kubectl-c2 delete pod vm-b -n vm-workloads --force --grace-period=0 --wait=false"
     sleep 5
     pe "kubectl-c2 apply -f ${MANIFESTS_DIR}/pod-vm-b.yaml"
-    pe "kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s"
+    kubectl-c2 wait --for=condition=Ready pod vm-b -n vm-workloads --timeout=30s
     pe "kubectl-c2 get pod vm-b -n vm-workloads -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/pod-networks}' | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['vm-workloads/stretched-l2']['ip_address'])\""
 fi
 wait
@@ -372,11 +374,11 @@ VM_B_IP_FULL=$(KUBECONFIG=${KUBECONFIG_C2} kubectl get pod vm-b -n vm-workloads 
 VM_B_IP=$(echo "${VM_B_IP_FULL}" | cut -d'/' -f1)
 
 comment "Pinging VM-B (${VM_B_IP}) from inside VM-A..."
-pe "kubectl-c1 exec vm-a -n vm-workloads -- ping -c 4 ${VM_B_IP}"
+pei "kubectl-c1 exec vm-a -n vm-workloads -- ping -c 4 ${VM_B_IP}"
 wait
 
 comment "Remote MAC learned via EVPN, right in the pod ARP table..."
-pe "kubectl-c1 exec vm-a -n vm-workloads -- arp -a"
+pei "kubectl-c1 exec vm-a -n vm-workloads -- arp -a"
 wait
 clear
 
@@ -402,14 +404,14 @@ VIP pools:
 wait
 
 comment "MetalLB peering at the local provider edge (iBGP, site AS)..."
-pe "kubectl-c1 get bgppeer,ipaddresspool,bgpadvertisement -n metallb-system"
+pei "kubectl-c1 get bgppeer,ipaddresspool,bgpadvertisement -n metallb-system"
 wait
 
 comment "Deploying a web service and requesting a LoadBalancer..."
 show_manifest "${MANIFESTS_DIR}/l3-service.yaml"
-pe "kubectl-c1 apply -f ${MANIFESTS_DIR}/l3-service.yaml"
-pe "kubectl-c1 wait --for=condition=Available deployment/web -n l3-services --timeout=60s"
-pe "kubectl-c1 get svc -n l3-services"
+pei "kubectl-c1 apply -f ${MANIFESTS_DIR}/l3-service.yaml"
+kubectl-c1 wait --for=condition=Available deployment/web -n l3-services --timeout=60s
+pei "kubectl-c1 get svc -n l3-services"
 wait
 
 say "The node's FRR announced the VIP to edge1 over iBGP; edge1 redistributed
@@ -430,11 +432,11 @@ if [[ -z "${VIP}" ]]; then
 fi
 
 comment "Edge1 (AS 65001): VIP learned from the cluster1 node via iBGP..."
-pe "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
+pei "podman exec evpn-edge1 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
 wait
 
 comment "Edge2 (AS 65002): the same VIP arrived over the eBGP transit from AS 65001..."
-pe "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
+pei "podman exec evpn-edge2 vtysh -c 'show bgp ipv4 unicast ${VIP}/32'"
 wait
 
 say "Request it from the other site with a host-network client — routed
@@ -445,7 +447,7 @@ wait
 
 comment "Deploying the client on cluster2 (host network — no L2 stretch)..."
 show_manifest "${MANIFESTS_DIR}/l3-client.yaml"
-pe "sed 's|__VIP__|${VIP}|' ${MANIFESTS_DIR}/l3-client.yaml | kubectl-c2 apply -f -"
+pei "sed 's|__VIP__|${VIP}|' ${MANIFESTS_DIR}/l3-client.yaml | kubectl-c2 apply -f -"
 wait
 
 # Wait (silently) for the client to report a result
@@ -463,9 +465,8 @@ if [[ "${CLIENT_OK}" -eq 0 ]]; then
 fi
 
 comment "Reading the client result..."
-pe "kubectl-c2 logs vip-client -n l3-services"
+pei "kubectl-c2 logs vip-client -n l3-services"
 wait
-clear
 
 redhatsay '**One BGP fabric, two consumers**
 
