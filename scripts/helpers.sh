@@ -24,9 +24,9 @@ function wait() {
 function act() {
   clear
   if [ "$HAS_GUM" = true ]; then
-    gum style --bold --foreground=226 --border=double --padding="1 2" --margin="1 1" "Act $1 — $2"
+    gum style --bold --foreground=226 --border=double --padding="1 2" --margin="1 1" "$1 — $2"
   else
-    printf '\n\033[1;33mAct %s — %s\033[0m\n\n' "$1" "$2"
+    printf '\n\033[1;33m %s — %s\033[0m\n\n' "$1" "$2"
   fi
   if [ -n "${_DEMO_START:-}" ]; then
     local elapsed=$(( $(date +%s) - _DEMO_START ))
@@ -42,6 +42,10 @@ function say() {
   else
     printf '\n\033[1;36m%s\033[0m\n\n' "$1"
   fi
+}
+
+function rh-say() {
+    echo "$1"| gum format | redhatsay
 }
 
 function comment() {
