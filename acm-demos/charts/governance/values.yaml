@@ -1,0 +1,11 @@
+clusterSet: global
+selector:
+  demo.redhat.com/enabled: "true"
+  environment: prod
+remediationAction: inform
+targetNamespace: acm-demo-baseline
+baselineValue: strict
+
+gitops:
+  enabled: false
+  channel: gitops-1.22

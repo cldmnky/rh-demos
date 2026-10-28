@@ -1,0 +1,118 @@
+{{- if not .Values.prerequisitesAcknowledged }}{{ fail "Approve networking, storage, community controller, RBAC, and Developer Preview hotplug prerequisites first" }}{{ end -}}
+{{- if not .Values.rebootPolicySupported }}{{ fail "Verify RebootPolicy support and operator-owned feature configuration before preparing automated ISO-to-disk reboot" }}{{ end -}}
+{{- if ne .Release.Namespace .Values.name }}{{ fail "Target release namespace must equal site name" }}{{ end -}}
+{{- if has .Values.name (list "cluster1" "cluster2-sno" "local-cluster") }}{{ fail "Use a separate ztp-sno site; do not adopt existing clusters" }}{{ end -}}
+{{- if not (has .Values.networkMode (list "multus" "pod" "udn")) }}{{ fail "networkMode must be multus, pod, or udn" }}{{ end -}}
+{{- $storage := required "storageClass is required" .Values.storageClass -}}
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: {{ .Values.vmName }}-root
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+spec:
+  source:
+    blank: {}
+  storage:
+    storageClassName: {{ $storage }}
+    volumeMode: Block
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: {{ .Values.diskSize }}
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: {{ .Values.vmName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  runStrategy: Halted
+  template:
+    metadata:
+      labels:
+        demo.redhat.com/site: {{ .Values.name }}
+    spec:
+{{- if and (has .Values.networkMode (list "pod" "udn")) .Values.podDNSServers }}
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+{{ .Values.podDNSServers | toYaml | indent 10 }}
+{{- end }}
+      domain:
+        cpu:
+          cores: {{ .Values.cpu }}
+        resources:
+          requests:
+            memory: {{ .Values.memory }}
+            cpu: {{ .Values.cpuRequest | default .Values.cpu | quote }}
+        rebootPolicy: Terminate
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+        devices:
+          disks:
+            - name: root
+              bootOrder: 1
+              disk:
+                bus: virtio
+            # Empty CD tray; KubeVirtBMC attaches the imported DV on InsertMedia.
+            - name: cdrom
+              cdrom:
+                bus: sata
+          interfaces:
+            - name: machine
+{{- if eq .Values.networkMode "pod" }}
+              masquerade: {}
+{{- else if eq .Values.networkMode "udn" }}
+              binding:
+                name: l2bridge
+{{- else }}
+              bridge: {}
+{{- end }}
+              macAddress: {{ required "macAddress is required" .Values.macAddress | quote }}
+      networks:
+        - name: machine
+{{- if has .Values.networkMode (list "pod" "udn") }}
+          pod: {}
+{{- else }}
+          multus:
+            networkName: {{ required "Use an approved existing L2 networkAttachment; no default masquerade fallback" .Values.networkAttachment | quote }}
+{{- end }}
+      volumes:
+        - name: root
+          dataVolume:
+            name: {{ .Values.vmName }}-root
+---
+apiVersion: bmc.kubevirt.io/v1beta1
+kind: VirtualMachineBMC
+metadata:
+  name: {{ .Values.vmName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+    bmc.kubevirt.io/datavolume-size-margin: {{ .Values.mediaSizeMarginPercent | quote }}
+spec:
+  virtualMachineRef:
+    name: {{ .Values.vmName }}
+  authSecretRef:
+    name: {{ .Values.bmcSecret }}
+  service:
+    type: ClusterIP
+  ipmi:
+    enabled: false
+  redfish:
+    virtualMedia:
+      storage:
+        storageClassName: {{ $storage }}
+        volumeMode: Block
+{{- if .Values.mediaCAConfigMap }}
+      tls:
+        caBundleConfigMapRef:
+          name: {{ .Values.mediaCAConfigMap }}
+{{- end }}

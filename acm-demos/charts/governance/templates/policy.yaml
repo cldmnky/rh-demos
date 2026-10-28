@@ -1,0 +1,75 @@
+{{- if not (has .Values.remediationAction (list "inform" "enforce")) }}{{ fail "remediationAction must be inform or enforce" }}{{ end -}}
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ .Values.clusterSet }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterSet: {{ .Values.clusterSet }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterSets: [{{ .Values.clusterSet | quote }}]
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+{{ .Values.selector | toYaml | indent 12 }}
+          matchExpressions:
+            - key: local-cluster
+              operator: NotIn
+              values: ["true"]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ .Release.Name }}-baseline
+        spec:
+          remediationAction: {{ .Values.remediationAction }}
+          severity: low
+          pruneObjectBehavior: None
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ .Values.targetNamespace }}
+                  labels:
+                    app.kubernetes.io/part-of: acm-demo
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: demo-security-baseline
+                  namespace: {{ .Values.targetNamespace }}
+                data:
+                  security-profile: {{ .Values.baselineValue | quote }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+placementRef:
+  name: {{ .Release.Name }}
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: {{ .Release.Name }}
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io

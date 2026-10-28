@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ztp-target
+description: Lab-only KubeVirt SNO substrate with KubeVirtBMC Redfish virtual media
+type: application
+version: 0.1.0

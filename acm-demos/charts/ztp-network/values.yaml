@@ -1,0 +1,3 @@
+name: ztp-l2
+# Supply a non-overlapping subnet selected for the environment.
+subnet: ""

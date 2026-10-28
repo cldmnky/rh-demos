@@ -1,0 +1,4 @@
+apiVersion: v2
+name: demo-source
+description: Lab-only Git and Helm source server for the ACM demonstration
+version: 0.1.0

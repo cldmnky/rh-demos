@@ -1,0 +1,37 @@
+# Local shell inputs (only examples belong in Git)
+config/*
+!config/*.example
+!config/*.example.*
+.env
+.env.*
+!.env.example
+
+# Environment-specific Helm overrides, wherever kept under this demo
+*.local.yaml
+*.local.yml
+*.local.env
+values/local/
+
+# Credentials and private connection material
+private/
+*.kubeconfig
+kubeconfig
+kubeconfig.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Rendered output can contain resolved Secrets / ignition / credentials
+rendered/
+artifacts/
+.cache/
+screenshots/
+*.tgz
+*.cast
+*.log
+# Presentation evidence belongs in the runbook.
+!docs/screenshots/
+!docs/screenshots/*.png
+# Personal editor/workspace state
+.obsidian/

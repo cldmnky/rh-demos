@@ -1,0 +1,4 @@
+apiVersion: v2
+name: agent-principal
+description: Isolated Argo CD Agent principal for the ACM demonstration
+version: 0.1.0

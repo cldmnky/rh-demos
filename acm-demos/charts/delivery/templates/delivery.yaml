@@ -1,0 +1,180 @@
+{{- $mode := .Values.mode -}}
+{{- if not (has $mode (list "subscription" "push" "agent")) }}{{ fail "mode must be subscription, push, or agent" }}{{ end -}}
+{{- if and (eq $mode "subscription") (ne .Release.Namespace .Values.application.namespace) }}{{ fail "Subscription release namespace must equal application.namespace" }}{{ end -}}
+{{- if and (ne $mode "subscription") (ne .Release.Namespace .Values.argoNamespace) }}{{ fail "Install Argo intent in argoNamespace" }}{{ end -}}
+{{- if and (eq $mode "agent") (not .Values.agent.platformReady) }}{{ fail "Agent principal, certificates, local controller, and isolation must be verified first: agent.platformReady=true" }}{{ end -}}
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ .Values.clusterSet }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterSet: {{ .Values.clusterSet }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterSets: [{{ .Values.clusterSet | quote }}]
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+{{ .Values.selector | toYaml | indent 12 }}
+          matchExpressions:
+            - key: local-cluster
+              operator: NotIn
+              values: ["true"]
+{{ if eq $mode "subscription" }}
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: Channel
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: HelmRepo
+  pathname: {{ required "subscription.helmRepoURL must point to a published Helm repository" .Values.subscription.helmRepoURL | quote }}
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  channel: {{ printf "%s/%s" .Release.Namespace .Release.Name }}
+  name: demo-app
+  packageFilter:
+    version: {{ .Values.subscription.chartVersion | quote }}
+  placement:
+    placementRef:
+      name: {{ .Release.Name }}
+      kind: Placement
+      apiVersion: cluster.open-cluster-management.io/v1beta1
+  packageOverrides:
+    - packageName: demo-app
+      packageOverrides:
+        - path: spec
+          value:
+            version: {{ .Values.application.version | quote }}
+            environment: {{ .Values.application.environment | quote }}
+            deliveryModel: ACM Subscription (deprecated)
+            image: {{ .Values.application.image | quote }}
+---
+apiVersion: app.k8s.io/v1beta1
+kind: Application
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  componentKinds:
+    - group: apps.open-cluster-management.io
+      kind: Subscription
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{ else }}
+{{ if .Values.applicationSetServiceAccount }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-placement-reader
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [cluster.open-cluster-management.io]
+    resources: [placementdecisions]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-placement-reader
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-placement-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.applicationSetServiceAccount }}
+    namespace: {{ .Release.Namespace }}
+{{ end }}
+---
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  argoServer:
+    argoNamespace: {{ .Values.argoNamespace }}
+  placementRef:
+    name: {{ .Release.Name }}
+    kind: Placement
+    apiVersion: cluster.open-cluster-management.io/v1beta1
+{{ if eq $mode "agent" }}
+  gitopsAddon:
+    enabled: true
+    argoCDAgent:
+      enabled: true
+      mode: managed
+      propagateHubCA: true
+      serverAddress: {{ required "agent.serverAddress is required" .Values.agent.serverAddress | quote }}
+      serverPort: {{ .Values.agent.serverPort | quote }}
+{{ end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-placement
+  namespace: {{ .Release.Namespace }}
+data:
+  apiVersion: cluster.open-cluster-management.io/v1beta1
+  kind: placementdecisions
+  statusListKey: decisions
+  matchKey: clusterName
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: {{ .Release.Name }}-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: {{ .Release.Name }}
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{ .Release.Name }}-{{ "{{name}}" }}'
+    spec:
+      project: default
+      source:
+        repoURL: {{ required "source.repoURL is required" .Values.source.repoURL | quote }}
+        targetRevision: {{ required "source.revision is required" .Values.source.revision | quote }}
+        path: {{ .Values.source.chartPath | quote }}
+        helm:
+          releaseName: {{ .Values.application.releaseName }}
+          values: |
+            version: {{ .Values.application.version | quote }}
+            environment: {{ .Values.application.environment | quote }}
+            deliveryModel: {{ ternary "Argo CD Agent (Technology Preview)" "Central Argo CD push" (eq $mode "agent") | quote }}
+            image: {{ .Values.application.image | quote }}
+      destination:
+        namespace: {{ .Values.application.namespace }}
+        name: '{{ "{{name}}" }}'
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+{{ end }}

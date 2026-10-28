@@ -1,0 +1,6 @@
+version: v1.0.0
+environment: Production
+deliveryModel: Central Argo CD push
+image: registry.access.redhat.com/ubi9/httpd-24@sha256:f044268a321397ff4af4945763e558e14aad584c915e4cae9ae485a30deda303
+# Digest resolved from the UBI HTTP server image and validated on cluster1.
+replicas: 1

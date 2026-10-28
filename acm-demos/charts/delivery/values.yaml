@@ -1,0 +1,29 @@
+mode: push
+clusterSet: global
+selector:
+  demo.redhat.com/enabled: "true"
+  environment: prod
+source:
+  repoURL: ""
+  revision: ""
+  chartPath: acm-demos/charts/demo-app
+application:
+  namespace: acm-demo-argo
+  releaseName: acm-demo-app
+  version: v1.0.0
+  environment: Production
+  image: registry.access.redhat.com/ubi9/httpd-24@sha256:f044268a321397ff4af4945763e558e14aad584c915e4cae9ae485a30deda303
+argoNamespace: openshift-gitops
+# For a separately named Argo CD instance, grant its ApplicationSet controller
+# access to PlacementDecisions in this release namespace.
+applicationSetServiceAccount: ""
+agent:
+  # Must be confirmed after principal/certificates and isolation are configured.
+  platformReady: false
+  serverAddress: ""
+  serverPort: "443"
+subscription:
+  # Optional published Helm repository containing a packaged demo-app chart.
+  # Git subscription Helm-directory support must be verified before live use.
+  helmRepoURL: ""
+  chartVersion: 0.1.0

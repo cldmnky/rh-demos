@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ztp-network
+description: Namespace-scoped primary L2 UDN for the ZTP lab
+type: application
+version: 0.1.0

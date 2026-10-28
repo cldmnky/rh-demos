@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ztp-dns
+description: Lab DNS for a ZTP site
+type: application
+version: 0.1.0

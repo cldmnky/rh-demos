@@ -1,0 +1,6 @@
+# Pin should match the hub's dns-default image; this was observed on OCP 4.22.18.
+image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:5cdd4aa79386d44a3904eecd93dd67eca30fb5681e74bb05cd475b1a19228a2d
+clusterDomain: ""
+apiAddress: ""
+ingressAddress: ""
+upstream: ""

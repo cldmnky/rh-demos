@@ -1,0 +1,92 @@
+{{- if eq .Values.phase "credentials" -}}
+{{- if not .Values.approvals.credentialStorage }}{{ fail "Accept storage of credential values in Helm release history" }}{{ end -}}
+{{- range $key := list "aws_access_key_id" "aws_secret_access_key" "baseDomain" "pullSecret" "ssh-publickey" "ssh-privatekey" }}
+{{- if not (index $.Values.credentials.data $key) }}{{ fail (printf "Missing credentials.data.%s in private local input" $key) }}{{ end -}}
+{{- end -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.credentials.name }}
+  namespace: {{ .Values.credentials.namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    cluster.open-cluster-management.io/credentials: ""
+    cluster.open-cluster-management.io/type: aws
+type: Opaque
+stringData:
+{{ .Values.credentials.data | toYaml | indent 2 }}
+{{- else if eq .Values.phase "image-set" }}
+apiVersion: hive.openshift.io/v1
+kind: ClusterImageSet
+metadata:
+  name: {{ required "imageSet is required" .Values.imageSet }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  releaseImage: {{ required "Provide approved releaseImage for missing ClusterImageSet" .Values.releaseImage | quote }}
+{{- else if eq .Values.phase "virtualization-operator" }}
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: demo-virtualization
+  namespace: {{ .Release.Namespace }}
+spec:
+  targetNamespaces: [{{ .Release.Namespace | quote }}]
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: kubevirt-hyperconverged
+  namespace: {{ .Release.Namespace }}
+spec:
+  name: kubevirt-hyperconverged
+  channel: {{ .Values.virtualization.channel | quote }}
+  source: {{ .Values.virtualization.source }}
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+{{- if .Values.virtualization.startingCSV }}
+  startingCSV: {{ .Values.virtualization.startingCSV }}
+{{- end }}
+{{- else if eq .Values.phase "virtualization-config" }}
+apiVersion: hco.kubevirt.io/v1
+kind: HyperConverged
+metadata:
+  name: kubevirt-hyperconverged
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec: {}
+{{- else if eq .Values.phase "ztp-secrets" }}
+{{- if not .Values.approvals.credentialStorage }}{{ fail "Accept Helm credential history storage" }}{{ end }}
+{{- $source := lookup "v1" "Secret" .Values.credentials.namespace .Values.credentials.name }}
+{{- if not $source }}{{ fail "ACM credential unavailable" }}{{ end }}
+{{- if not (lookup "v1" "Secret" .Release.Namespace .Values.ztp.pullSecret) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.ztp.pullSecret }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {{ required "ACM credential lacks pullSecret" (index $source.data "pullSecret") | quote }}
+{{- end }}
+{{- if not (lookup "v1" "Secret" .Release.Namespace .Values.ztp.bmcSecret) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.ztp.bmcSecret }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  username: {{ required "ztp.bmcCredentials.username is required" .Values.ztp.bmcCredentials.username | quote }}
+  password: {{ required "ztp.bmcCredentials.password is required" .Values.ztp.bmcCredentials.password | quote }}
+{{- end }}
+{{- else if ne .Values.phase "aws" }}
+{{- fail "Unknown prerequisites phase" }}
+{{- end }}

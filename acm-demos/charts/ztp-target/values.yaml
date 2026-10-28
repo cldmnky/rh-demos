@@ -1,0 +1,22 @@
+# Preparation only; do not continuously reconcile this VM's runtime fields.
+prerequisitesAcknowledged: false
+name: ztp-sno
+vmName: ztp-sno-node
+cpu: 12
+cpuRequest: 10
+memory: 32Gi
+storageClass: ""
+diskSize: 150Gi
+networkAttachment: ""
+# The pod and primary UDN modes require separately verified DNS and stable
+# API/ingress endpoints.
+networkMode: multus
+podDNSServers: []
+macAddress: ""
+bmcSecret: ztp-sno-bmc
+mediaCAConfigMap: ""
+# RebootPolicy support/gating must be confirmed via HCO before setting true.
+rebootPolicySupported: false
+
+# Buffer for CDI scratch filesystem overhead on Ceph RBD.
+mediaSizeMarginPercent: 50

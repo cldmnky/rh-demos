@@ -1,0 +1,5 @@
+apiVersion: v2
+name: aws-sno
+description: Opt-in Hive AWS SNO provisioning and ACM registration (not SiteConfig ZTP)
+type: application
+version: 0.1.0

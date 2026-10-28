@@ -1,0 +1,5 @@
+apiVersion: v2
+name: demo-prereqs
+description: Phase-scoped prerequisites used only by scripts/prereqs.sh
+type: application
+version: 0.1.0

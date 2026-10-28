@@ -1,0 +1,3 @@
+vmName: ztp-sno-node
+# OpenShift 4.22.18 CLI image. Override with the CLI image for the hub release.
+image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b31735da2b1e3b06734f3f504ac8ece7c71cfdd96ca74c5f750b600f3dc1a421

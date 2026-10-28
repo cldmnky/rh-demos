@@ -1,0 +1,8 @@
+prerequisitesAcknowledged: false
+storageClass: ""
+databaseSize: 10Gi
+filesystemSize: 100Gi
+imageSize: 20Gi
+osImages: []
+# Select actual RHCOS live ISO URL/version matching the agreed OCP release.
+# No guessed RHCOS URL or old tutorial release is silently supplied.

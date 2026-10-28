@@ -1,0 +1,93 @@
+{{- $domain := required "clusterDomain is required" .Values.clusterDomain -}}
+{{- $api := required "apiAddress is required" .Values.apiAddress -}}
+{{- $ingress := required "ingressAddress is required" .Values.ingressAddress -}}
+{{- $upstream := required "upstream DNS server is required" .Values.upstream -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+data:
+  Corefile: |
+    {{ $domain }}:1053 {
+        errors
+        reload
+        file /etc/coredns/site.zone
+    }
+    .:1053 {
+        errors
+        reload
+        forward . {{ $upstream }}
+    }
+  site.zone: |
+    $ORIGIN {{ $domain }}.
+    $TTL 30
+    @ IN SOA ns.{{ $domain }}. hostmaster.{{ $domain }}. 1 60 60 60 30
+    @ IN NS ns.{{ $domain }}.
+    ns IN A {{ $api }}
+    api IN A {{ $api }}
+    api-int IN A {{ $api }}
+    *.apps IN A {{ $ingress }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ printf "%s|%s|%s|%s" $domain $api $ingress $upstream | sha256sum }}
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: dns
+          image: {{ .Values.image | quote }}
+          command: ["coredns"]
+          args: ["-conf", "/etc/coredns/Corefile"]
+          ports:
+            - name: dns-udp
+              containerPort: 1053
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 1053
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /etc/coredns
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP

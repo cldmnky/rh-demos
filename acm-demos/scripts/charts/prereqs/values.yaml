@@ -1,0 +1,22 @@
+phase: ""
+approvals:
+  credentialStorage: false
+credentials:
+  name: aws
+  namespace: default
+  data: {}
+aws:
+  name: ""
+  topology: production
+  region: ""
+  imageSet: ""
+  instanceType: m5.2xlarge
+  workerType: m5.xlarge
+  clusterSet: default
+  demoPlacement: false
+releaseImage: ""
+imageSet: ""
+virtualization:
+  channel: stable
+  source: redhat-operators
+  startingCSV: ""

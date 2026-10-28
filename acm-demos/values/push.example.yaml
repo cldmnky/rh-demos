@@ -1,0 +1,10 @@
+mode: push
+argoNamespace: openshift-gitops
+source:
+  repoURL: https://example.invalid/your-fork.git
+  revision: demo
+application:
+  namespace: acm-demo-argo
+selector:
+  demo.redhat.com/enabled: "true"
+  environment: prod

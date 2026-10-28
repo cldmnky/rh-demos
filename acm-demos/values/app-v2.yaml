@@ -1,0 +1,3 @@
+# Direct demo-app render override. For delivery releases, commit application.version
+# in their reviewed values file instead of this top-level version key.
+version: v2.0.0

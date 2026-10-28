@@ -1,0 +1,62 @@
+{{- $name := required "clusterName is required" .Values.clusterName -}}
+{{- if ne .Release.Namespace $name }}{{ fail "Release namespace must equal clusterName" }}{{ end -}}
+{{- if eq $name "cluster1" }}{{ fail "cluster1 is console-owned and excluded from this chart" }}{{ end -}}
+{{- $domain := required "Set baseDomain to the approved AWS DNS domain" .Values.baseDomain -}}
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  baseDomain: {{ $domain | quote }}
+  clusterName: {{ $name }}
+  installed: false
+  platform:
+    aws:
+      region: {{ .Values.region | quote }}
+      credentialsSecretRef:
+        name: {{ .Values.credentials.awsSecret }}
+  provisioning:
+    imageSetRef:
+      name: {{ .Values.imageSet }}
+    installConfigSecretRef:
+      name: {{ .Values.credentials.installConfigSecret }}
+    sshPrivateKeySecretRef:
+      name: {{ .Values.credentials.sshSecret }}
+  pullSecretRef:
+    name: {{ .Values.credentials.pullSecret }}
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: {{ $name }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    cloud: Amazon
+    vendor: OpenShift
+    environment: {{ .Values.environment | quote }}
+    cluster.open-cluster-management.io/clusterset: {{ .Values.clusterSet | quote }}
+spec:
+  hubAcceptsClient: true
+---
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  clusterName: {{ $name }}
+  clusterNamespace: {{ .Release.Namespace }}
+  applicationManager:
+    enabled: true
+  certPolicyController:
+    enabled: true
+  policyController:
+    enabled: true
+  searchCollector:
+    enabled: true

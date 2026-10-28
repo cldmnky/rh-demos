@@ -1,0 +1,8 @@
+# OFFLINE FIXTURE ONLY. Resolve real release-matched ISO metadata before setup.
+prerequisitesAcknowledged: false
+storageClass: ocs-external-storagecluster-ceph-rbd
+osImages:
+  - openshiftVersion: "4.22"
+    version: REPLACE-WITH-VERIFIED-RHCOS-VERSION
+    cpuArchitecture: x86_64
+    url: https://example.invalid/rhcos-live.iso

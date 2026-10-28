@@ -1,0 +1,21 @@
+# Install the release INTO a preapproved, otherwise empty cluster namespace.
+# helm --create-namespace creates the release namespace; chart does not own it.
+clusterName: cluster2-sno
+baseDomain: ""
+region: us-west-2
+imageSet: img4.22.18-x86-64-appsub
+instanceType: m5.2xlarge
+rootVolumeGiB: 128
+clusterSet: default
+environment: qa
+credentials:
+  # Default renders references only; all four Secrets must already exist locally.
+  copyFromHub: false
+  # Copying credentials persists them in Helm release history. Explicit opt-in.
+  acceptReleaseSecretStorage: false
+  sourceNamespace: default
+  sourceName: aws
+  awsSecret: cluster2-sno-aws-creds
+  pullSecret: cluster2-sno-pull-secret
+  sshSecret: cluster2-sno-ssh-private-key
+  installConfigSecret: cluster2-sno-install-config

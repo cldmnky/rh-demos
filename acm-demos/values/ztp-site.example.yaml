@@ -1,0 +1,13 @@
+# Documentation addresses, not actual lab allocations. Do not install unchanged.
+prerequisitesAcknowledged: false
+labBmcTransportAccepted: false
+baseDomain: example.invalid
+sshPublicKey: ssh-ed25519 OFFLINE-FIXTURE-NOT-A-REAL-KEY
+# Confirm discovered Service port and Systems ID before using an endpoint.
+bmcAddress: redfish-virtualmedia+http://ztp-sno-node-virtbmc.ztp-sno.svc.cluster.local:80/redfish/v1/Systems/1
+node:
+  macAddress: "02:00:00:00:10:01"
+  address: 192.0.2.50
+  machineCIDR: 192.0.2.0/24
+  gateway: 192.0.2.1
+  dnsServers: [192.0.2.1]

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: governance
+description: Harmless ACM ConfigMap policy with narrowly scoped placement
+type: application
+version: 0.1.0

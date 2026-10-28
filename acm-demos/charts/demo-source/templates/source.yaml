@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: source
+        image: {{ .Values.image | quote }}
+        command: [/bin/sh, -ec]
+        args: ['mkdir -p /tmp/content; tar -xzf /bundle/source.tgz -C /tmp/content; exec python3 /tmp/content/server.py']
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /charts/index.yaml
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+        - name: bundle
+          mountPath: /bundle
+          readOnly: true
+      volumes:
+      - name: bundle
+        configMap:
+          name: {{ .Values.bundleConfigMap }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  to:
+    kind: Service
+    name: {{ .Release.Name }}
+  port:
+    targetPort: http

@@ -1,0 +1,29 @@
+{{- if not .Values.prerequisitesAcknowledged }}{{ fail "Approve shared AgentServiceConfig creation, storage, and release OS images first" }}{{ end -}}
+{{- $storage := required "storageClass is required" .Values.storageClass -}}
+apiVersion: agent-install.openshift.io/v1beta1
+kind: AgentServiceConfig
+metadata:
+  name: agent
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  databaseStorage:
+    accessModes: [ReadWriteOnce]
+    storageClassName: {{ $storage }}
+    resources:
+      requests:
+        storage: {{ .Values.databaseSize }}
+  filesystemStorage:
+    accessModes: [ReadWriteOnce]
+    storageClassName: {{ $storage }}
+    resources:
+      requests:
+        storage: {{ .Values.filesystemSize }}
+  imageStorage:
+    accessModes: [ReadWriteOnce]
+    storageClassName: {{ $storage }}
+    resources:
+      requests:
+        storage: {{ .Values.imageSize }}
+  osImages:
+{{ required "Supply verified osImages entries with openshiftVersion, version, url, cpuArchitecture" .Values.osImages | toYaml | indent 4 }}

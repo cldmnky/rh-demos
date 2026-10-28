@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: {{ .Values.name }}
+spec:
+  server:
+    route:
+      enabled: true
+  sso:
+    provider: dex
+    dex:
+      openShiftOAuth: true
+  rbac:
+    scopes: '[groups]'
+    policy: |
+      g, system:cluster-admins, role:admin
+      g, cluster-admins, role:admin
+      g, acm-demo-presenters, role:readonly
+  controller:
+    enabled: false
+  applicationSet:
+    enabled: true
+  argoCDAgent:
+    principal:
+      enabled: true
+      destinationBasedMapping: true
+      auth: 'mtls:CN=system:open-cluster-management:cluster:([^:]+):addon:gitops-addon:agent:gitops-addon-agent'
+      namespace:
+        allowedNamespaces:
+        - '*'
+      server:
+        route:
+          enabled: true

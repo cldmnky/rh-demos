@@ -1,0 +1,5 @@
+apiVersion: v2
+name: delivery
+description: ACM subscription or Argo CD push/agent intent; agent platform setup is separate
+type: application
+version: 0.1.0

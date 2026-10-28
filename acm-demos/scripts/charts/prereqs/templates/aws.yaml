@@ -1,0 +1,103 @@
+{{- if eq .Values.phase "aws" -}}
+{{- if not .Values.approvals.credentialStorage }}{{ fail "AWS prerequisites store copied credentials in Helm release history; explicit acceptance required" }}{{ end -}}
+{{- if not (has .Values.aws.topology (list "production" "sno")) }}{{ fail "aws.topology must be production or sno" }}{{ end -}}
+{{- $name := required "aws.name is required" .Values.aws.name -}}
+{{- if ne $name .Release.Namespace }}{{ fail "AWS namespace must equal cluster name" }}{{ end -}}
+{{- $secret := lookup "v1" "Secret" .Values.credentials.namespace .Values.credentials.name -}}
+{{- if not $secret }}{{ fail "Source ACM credential must exist; lookup requires live Helm execution" }}{{ end -}}
+{{- $data := $secret.data -}}
+{{- range $key := list "aws_access_key_id" "aws_secret_access_key" "baseDomain" "pullSecret" "ssh-publickey" "ssh-privatekey" }}
+{{- if not (index $data $key) }}{{ fail (printf "Source credential lacks %s" $key) }}{{ end -}}
+{{- end -}}
+{{- $domain := index $data "baseDomain" | b64dec | trim -}}
+{{- $sno := eq .Values.aws.topology "sno" -}}
+{{- $install := dict "apiVersion" "v1" "baseDomain" $domain "metadata" (dict "name" $name) "publish" "External" "pullSecret" (index $data "pullSecret" | b64dec) "sshKey" (index $data "ssh-publickey" | b64dec | trim) -}}
+{{- $_ := set $install "compute" (list (dict "name" "worker" "replicas" (ternary 0 3 $sno) "architecture" "amd64" "platform" (dict "aws" (dict "type" .Values.aws.workerType)))) -}}
+{{- $_ := set $install "controlPlane" (dict "name" "master" "replicas" (ternary 1 3 $sno) "architecture" "amd64" "platform" (dict "aws" (dict "type" .Values.aws.instanceType "rootVolume" (dict "size" 128 "type" "gp3")))) -}}
+{{- $_ := set $install "platform" (dict "aws" (dict "region" (required "aws.region is required" .Values.aws.region))) -}}
+{{- $_ := set $install "networking" (dict "networkType" "OVNKubernetes" "clusterNetwork" (list (dict "cidr" "10.128.0.0/14" "hostPrefix" 23)) "machineNetwork" (list (dict "cidr" "10.0.0.0/16")) "serviceNetwork" (list "172.30.0.0/16")) -}}
+{{- $proxy := dict -}}
+{{- range $key := list "httpProxy" "httpsProxy" "noProxy" }}
+{{- $value := index $data $key | default "" | b64dec | trim }}
+{{- if $value }}{{ $_ := set $proxy $key $value }}{{ end }}
+{{- end -}}
+{{- if $proxy }}{{ $_ := set $install "proxy" $proxy }}{{ end -}}
+{{- $trust := index $data "additionalTrustBundle" | default "" | b64dec -}}
+{{- if $trust }}{{ $_ := set $install "additionalTrustBundle" $trust }}{{ end -}}
+{{- $secrets := list
+  (dict "name" (printf "%s-aws" $name) "type" "Opaque" "data" (dict "aws_access_key_id" (index $data "aws_access_key_id") "aws_secret_access_key" (index $data "aws_secret_access_key")))
+  (dict "name" (printf "%s-pull" $name) "type" "kubernetes.io/dockerconfigjson" "data" (dict ".dockerconfigjson" (index $data "pullSecret")))
+  (dict "name" (printf "%s-ssh" $name) "type" "Opaque" "data" (dict "ssh-privatekey" (index $data "ssh-privatekey")))
+  (dict "name" (printf "%s-install" $name) "type" "Opaque" "data" (dict "install-config.yaml" ($install | toYaml | b64enc))) -}}
+{{- range $item := $secrets }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $item.name }}
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: {{ $item.type }}
+data:
+{{ $item.data | toYaml | indent 2 }}
+{{- end }}
+---
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  baseDomain: {{ $domain | quote }}
+  clusterName: {{ $name }}
+  installed: false
+  platform:
+    aws:
+      region: {{ .Values.aws.region | quote }}
+      credentialsSecretRef:
+        name: {{ $name }}-aws
+  provisioning:
+    imageSetRef:
+      name: {{ required "aws.imageSet is required" .Values.aws.imageSet }}
+    installConfigSecretRef:
+      name: {{ $name }}-install
+    sshPrivateKeySecretRef:
+      name: {{ $name }}-ssh
+  pullSecretRef:
+    name: {{ $name }}-pull
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: {{ $name }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    environment: {{ ternary "qa" "prod" $sno }}
+    cloud: Amazon
+    vendor: OpenShift
+    cluster.open-cluster-management.io/clusterset: {{ .Values.aws.clusterSet }}
+{{- if .Values.aws.demoPlacement }}
+    demo.redhat.com/enabled: "true"
+{{- end }}
+spec:
+  hubAcceptsClient: true
+---
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  clusterName: {{ $name }}
+  clusterNamespace: {{ .Release.Namespace }}
+  applicationManager: {enabled: true}
+  certPolicyController: {enabled: true}
+  policyController: {enabled: true}
+  searchCollector: {enabled: true}
+{{- end }}

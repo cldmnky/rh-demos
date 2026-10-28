@@ -1,0 +1,5 @@
+apiVersion: v2
+name: assisted-service
+description: Opt-in AgentServiceConfig; not SiteConfig/HCO operator adoption
+type: application
+version: 0.1.0

@@ -1,0 +1,19 @@
+{{- if .Values.gitopsOperator.enabled }}
+{{- if ne .Release.Namespace "openshift-operators" }}{{ fail "Install operator intent in openshift-operators" }}{{ end }}
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-gitops-operator
+  namespace: {{ .Release.Namespace }}
+spec:
+  name: openshift-gitops-operator
+  channel: {{ .Values.gitopsOperator.channel }}
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: {{ .Values.gitopsOperator.installPlanApproval }}
+{{- if .Values.gitopsOperator.env }}
+  config:
+    env:
+{{ toYaml .Values.gitopsOperator.env | indent 6 }}
+{{- end }}
+{{- end }}

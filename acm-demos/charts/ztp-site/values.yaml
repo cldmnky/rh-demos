@@ -1,0 +1,29 @@
+prerequisitesAcknowledged: false
+name: ztp-sno
+baseDomain: ""
+imageSet: img4.22.18-x86-64-appsub
+pullSecret: ztp-sno-pull-secret
+sshPublicKey: ""
+# true still allows discovery/boot; it holds the destructive OS installation.
+holdInstallation: true
+templatesNamespace: siteconfig-operator
+clusterTemplate: ai-cluster-templates-v1
+nodeTemplate: ai-node-templates-v1
+bmcAddress: ""
+bmcSecret: ztp-sno-bmc
+# Upstream AI templates disable BMC certificate validation. This needs explicit
+# acceptance for a trusted lab or replacement templates before live installation.
+labBmcTransportAccepted: false
+node:
+  hostName: ztp-sno-node
+  macAddress: ""
+  interfaceName: enp1s0
+  # Use DHCP for the KubeVirt masquerade pod network; static remains the default.
+  networkMode: static
+  address: ""
+  prefixLength: 24
+  gateway: ""
+  dnsServers: []
+  machineCIDR: ""
+  rootDevice: /dev/vda
+ntpSources: []

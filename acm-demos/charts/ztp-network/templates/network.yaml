@@ -1,0 +1,13 @@
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  topology: Layer2
+  layer2:
+    role: Primary
+    subnets:
+      - {{ required "Choose a non-overlapping UDN subnet" .Values.subnet | quote }}
+    ipam:
+      lifecycle: Persistent

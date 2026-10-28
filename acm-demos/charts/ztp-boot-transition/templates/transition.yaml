@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}
+rules:
+  - apiGroups: [agent-install.openshift.io]
+    resources: [agents]
+    verbs: [list]
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines]
+    resourceNames: [{{ .Values.vmName | quote }}]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  activeDeadlineSeconds: 7200
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: transition
+          image: {{ .Values.image | quote }}
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              while :; do
+                stage=$(oc get agents -l 'agent-install.openshift.io/bmh={{ .Values.vmName }}' -o jsonpath='{.items[0].status.progress.currentStage}' 2>/dev/null || true)
+                case "$stage" in
+                  Installing|"Writing image to disk"|"Copying registry data to disk") break ;;
+                  Rebooting|Joined|Done) echo 'Installation already reached reboot; refusing late transition' >&2; exit 1 ;;
+                esac
+                sleep 10
+              done
+              root=$(oc get vm {{ .Values.vmName }} -o jsonpath='{.spec.template.spec.domain.devices.disks[0].name}:{.spec.template.spec.domain.devices.disks[0].bootOrder}')
+              cd=$(oc get vm {{ .Values.vmName }} -o jsonpath='{.spec.template.spec.domain.devices.disks[1].name}:{.spec.template.spec.domain.devices.disks[1].bootOrder}')
+              if [ "$root" = root:1 ] && [ "$cd" = cdrom:2 ]; then
+                echo 'Root disk already first'; exit 0
+              fi
+              [ "$root" = root:2 ] && [ "$cd" = cdrom:1 ] || { echo 'Unexpected boot configuration' >&2; exit 1; }
+              oc patch vm {{ .Values.vmName }} --type=json -p '[{"op":"test","path":"/spec/template/spec/domain/devices/disks/0/name","value":"root"},{"op":"test","path":"/spec/template/spec/domain/devices/disks/1/name","value":"cdrom"},{"op":"test","path":"/spec/template/spec/domain/devices/disks/0/bootOrder","value":2},{"op":"test","path":"/spec/template/spec/domain/devices/disks/1/bootOrder","value":1},{"op":"replace","path":"/spec/template/spec/domain/devices/disks/0/bootOrder","value":1},{"op":"replace","path":"/spec/template/spec/domain/devices/disks/1/bootOrder","value":2}]'
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]

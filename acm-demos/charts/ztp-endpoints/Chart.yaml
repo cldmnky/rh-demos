@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ztp-endpoints
+description: Stable internal service for the ZTP lab VM
+type: application
+version: 0.1.0

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: bootstrap
+description: Opt-in OpenShift GitOps operator subscription only
+type: application
+version: 0.1.0

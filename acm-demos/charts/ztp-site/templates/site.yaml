@@ -1,0 +1,86 @@
+{{- if not .Values.prerequisitesAcknowledged }}{{ fail "Verify SiteConfig/templates, Assisted Installer, Redfish, networking, DNS, and private secret references before rendering site intent" }}{{ end -}}
+{{- if not .Values.labBmcTransportAccepted }}{{ fail "Review AI template certificate-verification behavior and approve trusted-lab BMC transport or supply hardened templates" }}{{ end -}}
+{{- if ne .Release.Namespace .Values.name }}{{ fail "Site release namespace must equal site name" }}{{ end -}}
+{{- if has .Values.name (list "cluster1" "cluster2-sno" "local-cluster") }}{{ fail "Use a separate site name" }}{{ end -}}
+{{- if not (has .Values.node.networkMode (list "static" "dhcp")) }}{{ fail "node.networkMode must be static or dhcp" }}{{ end -}}
+apiVersion: siteconfig.open-cluster-management.io/v1alpha1
+kind: ClusterInstance
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  clusterName: {{ .Values.name }}
+  clusterType: SNO
+  cpuArchitecture: x86_64
+  platformType: None
+  networkType: OVNKubernetes
+  baseDomain: {{ required "baseDomain is required" .Values.baseDomain | quote }}
+  clusterImageSetNameRef: {{ .Values.imageSet }}
+  holdInstallation: {{ .Values.holdInstallation }}
+  pullSecretRef:
+    name: {{ .Values.pullSecret }}
+  sshPublicKey: {{ required "sshPublicKey is required (public key only)" .Values.sshPublicKey | quote }}
+  machineNetwork:
+    - cidr: {{ required "node.machineCIDR is required" .Values.node.machineCIDR }}
+  clusterNetwork:
+    - cidr: 10.128.0.0/14
+      hostPrefix: 23
+  serviceNetwork:
+    - cidr: 172.30.0.0/16
+{{- if .Values.ntpSources }}
+  additionalNTPSources:
+{{ .Values.ntpSources | toYaml | indent 4 }}
+{{- end }}
+  extraLabels:
+    ManagedCluster:
+      environment: ztp
+  templateRefs:
+    - name: {{ .Values.clusterTemplate }}
+      namespace: {{ .Values.templatesNamespace }}
+  nodes:
+    - hostName: {{ .Values.node.hostName }}
+      role: master
+      bootMode: UEFI
+      automatedCleaningMode: disabled
+      ironicInspect: disabled
+      bmcAddress: {{ required "bmcAddress must use the verified Redfish endpoint" .Values.bmcAddress | quote }}
+      bmcCredentialsName:
+        name: {{ .Values.bmcSecret }}
+      bootMACAddress: {{ required "node.macAddress is required" .Values.node.macAddress | quote }}
+      rootDeviceHints:
+        deviceName: {{ .Values.node.rootDevice }}
+      templateRefs:
+        - name: {{ .Values.nodeTemplate }}
+          namespace: {{ .Values.templatesNamespace }}
+{{- if eq .Values.node.networkMode "static" }}
+      nodeNetwork:
+        interfaces:
+          - name: {{ .Values.node.interfaceName }}
+            macAddress: {{ .Values.node.macAddress | quote }}
+        config:
+          interfaces:
+            - name: {{ .Values.node.interfaceName }}
+              type: ethernet
+              state: up
+              mac-address: {{ .Values.node.macAddress | quote }}
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                  - ip: {{ required "node.address is required" .Values.node.address }}
+                    prefix-length: {{ .Values.node.prefixLength }}
+              ipv6:
+                enabled: false
+          dns-resolver:
+            config:
+              server:
+{{ required "node.dnsServers is required" .Values.node.dnsServers | toYaml | indent 16 }}
+          routes:
+            config:
+              - destination: 0.0.0.0/0
+                next-hop-interface: {{ .Values.node.interfaceName }}
+                next-hop-address: {{ required "node.gateway is required" .Values.node.gateway }}
+                table-id: 254
+{{- end }}

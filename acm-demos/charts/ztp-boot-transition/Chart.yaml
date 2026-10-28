@@ -1,0 +1,4 @@
+apiVersion: v2
+name: ztp-boot-transition
+description: Restore the SNO root disk as the first boot device after discovery
+version: 0.1.0

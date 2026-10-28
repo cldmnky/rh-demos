@@ -1,0 +1,15 @@
+mode: agent
+# Separate principal instance required; do not alter the central push instance.
+argoNamespace: acm-agent-hub
+source:
+  repoURL: https://example.invalid/your-fork.git
+  revision: demo
+application:
+  namespace: acm-demo-agent
+  environment: QA
+selector:
+  demo.redhat.com/enabled: "true"
+  environment: qa
+agent:
+  platformReady: false
+  serverAddress: ""

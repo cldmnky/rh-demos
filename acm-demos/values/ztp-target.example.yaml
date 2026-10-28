@@ -1,0 +1,6 @@
+# OFFLINE FIXTURE ONLY; not an existing network or permission to install.
+prerequisitesAcknowledged: false
+rebootPolicySupported: false
+storageClass: ocs-external-storagecluster-ceph-rbd
+networkAttachment: ztp-sno/approved-machine-network
+macAddress: "02:00:00:00:10:01"

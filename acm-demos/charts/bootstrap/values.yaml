@@ -1,0 +1,5 @@
+gitopsOperator:
+  enabled: false
+  channel: gitops-1.22
+  installPlanApproval: Manual
+# No default ArgoCD override, RBAC expansion, or MCH component-array patch.

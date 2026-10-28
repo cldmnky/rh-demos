@@ -1,0 +1,9 @@
+mode: subscription
+application:
+  namespace: acm-demo-subscription
+subscription:
+  helmRepoURL: https://example.invalid/helm
+  chartVersion: 0.1.0
+selector:
+  demo.redhat.com/enabled: "true"
+  environment: prod
