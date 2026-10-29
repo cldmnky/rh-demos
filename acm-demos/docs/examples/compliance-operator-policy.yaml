@@ -1,0 +1,74 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: demo-compliance-operator
+  namespace: acm-demo-compliance
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: demo-compliance-operator-install
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: None
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: openshift-compliance
+                  labels:
+                    openshift.io/cluster-monitoring: "true"
+                    pod-security.kubernetes.io/enforce: privileged
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: compliance-operator
+                  namespace: openshift-compliance
+                spec:
+                  targetNamespaces:
+                    - openshift-compliance
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: compliance-operator-sub
+                  namespace: openshift-compliance
+                spec:
+                  channel: stable
+                  installPlanApproval: Automatic
+                  name: compliance-operator
+                  source: redhat-operators
+                  sourceNamespace: openshift-marketplace
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: demo-compliance
+  namespace: acm-demo-compliance
+spec:
+  clusterSets:
+    - demo-compliance
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: demo-compliance-operator
+  namespace: acm-demo-compliance
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: demo-compliance
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: demo-compliance-operator
