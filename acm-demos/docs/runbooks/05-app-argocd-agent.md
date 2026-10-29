@@ -35,7 +35,7 @@ available; do not invent a UI menu or expose certificate/authentication material
 ```bash
 oc_agent get applications.argoproj.io -n "$AGENT_GITOPS_NS" \
   -o 'custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
-oc_agent get application "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
+oc_agent get applications.argoproj.io "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
   jq '{name:.metadata.name,destination:.spec.destination,
        source:.spec.source.path,sync:.status.sync.status,health:.status.health.status}'
 ```
@@ -61,7 +61,7 @@ update starts at the principal; we are not patching a managed Deployment to simu
 
 ```bash
 oc_agent rollout status "deployment/$APP_RELEASE" -n "$AGENT_APP_NS" --timeout=90s
-oc_agent get application "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
+oc_agent get applications.argoproj.io "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
   jq '{sync:.status.sync.status,health:.status.health.status}'
 oc_agent get route "$APP_RELEASE" -n "$AGENT_APP_NS" -o jsonpath='https://{.spec.host}{"\n"}'
 ```
@@ -74,7 +74,7 @@ The local controller/Application and the real response together establish the ta
 Return to the principal tree: v2 desired input, returned Synced/Healthy. Optional precise proof:
 
 ```bash
-oc_hub get application "$AGENT_APP" -n "$PRINCIPAL_NS" -o json |
+oc_hub get applications.argoproj.io "$AGENT_APP" -n "$PRINCIPAL_NS" -o json |
   jq '{sync:.status.sync.status,health:.status.health.status}'
 ```
 

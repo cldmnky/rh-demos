@@ -149,6 +149,18 @@ membership changes any existing policy or application decision before starting t
 6. **Agent principal Argo CD:** Application `$AGENT_APP` in the separate principal instance.
 7. The three real application pages; optional reviewed source/values comparison in Git.
 
+The agent principal has its **own Argo CD console**, separate from the central push console.
+Find its URL on the hub, then sign in with OpenShift SSO:
+
+```bash
+oc_hub get route agent-principal-server -n "$PRINCIPAL_NS" \
+  -o jsonpath='https://{.spec.host}{"\n"}'
+```
+
+Open the `agent-principal-server` route for the UI, not the similarly named agent-connection
+route. The central `openshift-gitops` console shows the push Applications; the agent Application
+appears in the separate principal console.
+
 Authenticate before sharing the screen. If the application routes use a default ingress certificate, configure the presenter browser to trust that cluster CA before the talk. Application screenshots were captured with certificate verification disabled for this lab. Menu names vary slightly by installed console version.
 Never show Secret pages, kubeconfigs, BMC passwords, signed ISO URLs, ignition, or unfiltered
 authentication/installer logs.
@@ -762,7 +774,7 @@ controller observes the resulting application definition and applies the update 
 
 ```bash
 oc_prod rollout status "deployment/$APP_RELEASE" -n "$PUSH_NS" --timeout=90s
-oc_hub get application "$PUSH_APP" -n "$CENTRAL_NS" -o json |
+oc_hub get applications.argoproj.io "$PUSH_APP" -n "$CENTRAL_NS" -o json |
   jq '{sync:.status.sync.status,health:.status.health.status}'
 oc_prod get route "$APP_RELEASE" -n "$PUSH_NS" -o jsonpath='https://{.spec.host}{"\n"}'
 ```
@@ -798,15 +810,16 @@ and report the result back.”
 
 **Show:** the separate agent-principal Argo console → `$AGENT_APP`; compare its returned status with the managed-cluster objects in the terminal.
 
-Separate principal Argo → `$AGENT_APP`. Show the source and v1 intent, then inspect the prepared
-managed target:
+Open the **separate principal Argo console** using the `agent-principal-server` route from the
+preparation step, then select `$AGENT_APP`. It will not appear in the central push console.
+Show the source and v1 intent, then inspect the prepared managed target:
 
 ```bash
 oc_hub get gitopscluster "$AGENT_RELEASE" -n "$PRINCIPAL_NS" -o json |
   jq '{principal:.spec.argoServer,agent:.spec.gitopsAddon.argoCDAgent}'
 oc_hub get managedclusteraddons -n "$AGENT_CLUSTER"
 oc_agent get deployments -n "$AGENT_GITOPS_NS"
-oc_agent get application "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
+oc_agent get applications.argoproj.io "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
   jq '{name:.metadata.name,destination:.spec.destination,
        sync:.status.sync.status,health:.status.health.status}'
 ```
@@ -837,10 +850,10 @@ agent delivery.” Keep push and agent principal instances visibly separate.
 
 ```bash
 oc_agent rollout status "deployment/$APP_RELEASE" -n "$AGENT_APP_NS" --timeout=90s
-oc_agent get application "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
+oc_agent get applications.argoproj.io "$LOCAL_AGENT_APP" -n "$AGENT_GITOPS_NS" -o json |
   jq '{sync:.status.sync.status,health:.status.health.status}'
 oc_agent get route "$APP_RELEASE" -n "$AGENT_APP_NS" -o jsonpath='https://{.spec.host}{"\n"}'
-oc_hub get application "$AGENT_APP" -n "$PRINCIPAL_NS" -o json |
+oc_hub get applications.argoproj.io "$AGENT_APP" -n "$PRINCIPAL_NS" -o json |
   jq '{sync:.status.sync.status,health:.status.health.status}'
 ```
 

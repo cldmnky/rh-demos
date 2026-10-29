@@ -55,7 +55,7 @@ oc_prod rollout status "deployment/$APP_RELEASE" -n "$PUSH_NS" --timeout=90s
 oc_prod get deployment "$APP_RELEASE" -n "$PUSH_NS" -o json |
   jq '{ready:.status.readyReplicas,updated:.status.updatedReplicas,
        checksum:.spec.template.metadata.annotations["checksum/content"]}'
-oc_hub get application "$PUSH_APP" -n "$CENTRAL_NS" -o json |
+oc_hub get applications.argoproj.io "$PUSH_APP" -n "$CENTRAL_NS" -o json |
   jq '{destination:.spec.destination,sync:.status.sync.status,health:.status.health.status}'
 ```
 
