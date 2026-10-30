@@ -1,0 +1,64 @@
+apiVersion: argoproj.io/v1alpha1
+kind: RolloutManager
+metadata:
+  name: rocket-ramen
+spec:
+  namespaceScoped: true
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: orders-api-container
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: orders-web-container
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: orders-api-container
+spec:
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  output:
+    to: {kind: ImageStreamTag, name: 'orders-api-container:demo'}
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: orders-web-container
+spec:
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  output:
+    to: {kind: ImageStreamTag, name: 'orders-web-container:demo'}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-api-container
+spec:
+  selector: {app: orders-api-container}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-web-container
+spec:
+  selector: {app: orders-web-container}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

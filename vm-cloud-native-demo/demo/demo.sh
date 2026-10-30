@@ -6,48 +6,39 @@ cd "$DEMO_DIR"
 if ! command -v pv >/dev/null; then set -- -d "$@"; fi
 . "$REPO_ROOT/scripts/demo-magic.sh"
 . "$REPO_ROOT/scripts/helpers.sh"
-NAMESPACE=${NAMESPACE:-vm-cloud-native}
+NAMESPACE=${NAMESPACE:-rocket-ramen}
 export NAMESPACE
 HOST=$(oc get route orders -n "$NAMESPACE" -o jsonpath='{.spec.host}')
 export HOST
 
-act 1 'Three VM tiers, one noodle bar'
-pe 'oc get vm -n "$NAMESPACE"'
-say 'Rocket Ramen: a PatternFly SPA, a Go API that streams over SSE, and MariaDB holding every order.'
-p '# In the browser: the masthead says web VM, API VM, and a MariaDB version. That strip follows us all session.'
-pe 'curl -fsS "http://$HOST/api/menu" | python3 -c "import json,sys; d=json.load(sys.stdin)[\"items\"]; print(len(d), \"dishes, first:\", d[0][\"name\"])"'
-pe 'curl -fsS "http://$HOST/api/stats" | python3 -m json.tool'
+act 1 'A familiar three-tier application'
+p '# In the browser: open Rocket Ramen, place an order, and point out the VM badges.'
+pe 'oc get vm orders-web orders-app orders-db -n "$NAMESPACE"'
+pe 'oc get pipelineruns -n "$NAMESPACE" | grep orders-bootstrap'
+pe 'cat automation/chart/files/ansible/api.yml'
+p '# Switch to Dev Spaces: show the source, devfile and Containerfiles.'
 
-act 2 'Real work: a transaction, not a SELECT 1'
-pe 'curl -fsS -X POST "http://$HOST/api/orders" -H "Content-Type: application/json" -d "{\"customer\":\"Cadet Vega\",\"items\":[{\"menu_item_id\":1,\"qty\":1}]}"'
-p '# LOCKED stock, priced basket, ETA from queue depth, order_items, event, COMMIT. Sell out a dish and the whole basket rolls back.'
-pe 'curl -fsS "http://$HOST/api/orders?limit=5" | python3 -m json.tool | head -40'
+act 2 'Build the containers in Dev Spaces'
+p '# In the node terminal: ./scripts/build-frontend.sh'
+p '# In the OpenShift CLI terminal: ./modernization/build.sh api && ./modernization/build.sh web'
+p '# Apply from the workspace: ./modernization/deploy.sh'
+p '# These are OpenShift binary builds from the workspace; no container daemon is needed in Dev Spaces.'
+pe 'oc get builds,deploy,rollout -n "$NAMESPACE"'
+pe 'cat modernization/workloads.yaml'
 
-act 3 'Development in Dev Spaces'
-pe 'cat devfile.yaml'
-pe 'cat frontend/Containerfile'
-pe 'cat backend/Containerfile'
-p '# Switch to the prepared Dev Spaces workspace: show src/App.tsx, the SSE client, and run the Playwright suite.'
-p '# npx playwright test --headed  => the audience watches a real browser place an order.'
+act 3 'Run VMs and containers side by side'
+pe './modernization/traffic.sh api container'
+pe './modernization/traffic.sh web 50'
+pe 'oc set route-backends orders -n "$NAMESPACE"'
+p '# Refresh the browser or make new connections: the frontend is split between VM and container.'
+pe './modernization/traffic.sh web 100'
+p '# The VM frontend is still available for rollback; the API and frontend now run as containers.'
 
-act 4 'Modernize the application tiers'
-if [[ ${RUN_CUTOVER:-false} == true ]]; then
-  : "${API_IMAGE:?Set API_IMAGE before starting the cutover}"
-  : "${FRONTEND_IMAGE:?Set FRONTEND_IMAGE before starting the cutover}"
-  export API_IMAGE FRONTEND_IMAGE
-  pe './scripts/service.sh prepare app "$API_IMAGE"'
-  pe './scripts/service.sh activate app'
-  p '# Masthead: web VM, api container. Same MariaDB, same orders.'
-  pe '(cd frontend && EXPECTED_API_RUNTIME=container npx playwright test e2e/stack.spec.ts)'
-  pe './scripts/service.sh prepare web "$FRONTEND_IMAGE"'
-  pe './scripts/service.sh activate web'
-  pe '(cd frontend && EXPECTED_WEB_RUNTIME=container EXPECTED_API_RUNTIME=container npx playwright test e2e/stack.spec.ts)'
-  p '# Both tiers are containers now and every order placed on the VMs is still on the board.'
-else
-  p '# Set RUN_CUTOVER=true, API_IMAGE and FRONTEND_IMAGE to perform the cutover.'
-fi
-
-act 5 'MariaDB on an image-mode VM'
+act 4 'The database stays a VM, with an image-managed OS'
 pe 'cat bootc/Containerfile'
-p '# The database is the tier we deliberately keep on a VM. bootc VM creation and data cutover are planned, not yet implemented.'
-say 'Same application, same data, three different operating models.'
+p '# The target bootc VM and its OS disk were prepared before the session.'
+pe './bootc/migrate.sh'
+pe './bootc/status.sh'
+pe './bootc/retire-legacy.sh'
+pe 'oc get vm,pods -n "$NAMESPACE"'
+say 'We choose the modernization path for each tier, while keeping the application on one platform.'

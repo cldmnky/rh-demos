@@ -1,4 +1,0 @@
-apiVersion: v2
-name: vm-cloud-native
-version: 0.1.0
-description: Three-tier modernization demo

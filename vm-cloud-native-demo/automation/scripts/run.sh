@@ -2,8 +2,8 @@
 set -euo pipefail
 : "${NAMESPACE:?Set NAMESPACE to the dedicated demo namespace}"
 case ${1:-} in
-  provision|configure|bootstrap|stage-api) pipeline="orders-$1" ;;
-  *) echo 'Usage: run.sh provision|configure|bootstrap|stage-api' >&2; exit 2 ;;
+  provision|configure|bootstrap|stage-api|builder) pipeline="orders-$1" ;;
+  *) echo 'Usage: run.sh provision|configure|bootstrap|stage-api|builder' >&2; exit 2 ;;
 esac
 run=$(cat <<YAML | oc create -n "$NAMESPACE" -f - -o name
 apiVersion: tekton.dev/v1

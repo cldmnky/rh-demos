@@ -2,7 +2,7 @@
 
 This independent automation package prepares the **pre-presentation baseline**: three RHEL 10 VMs for the Node.js frontend, Go API, and MariaDB. Tekton creates the VM resources and runs Ansible to configure the guests. Cloud-init only creates the SSH automation user. Setup is intended to complete before the presentation.
 
-**Status:** the RHEL 10 VM baseline has been exercised on OpenShift 4.22 with the current Rocket Ramen artifacts, including a repeat Ansible run that preserved the database. Revalidate the artifact and API contracts whenever the application changes. The existing `../chart` and `../scripts` are a separate prototype; do not install both releases into the same namespace because they use the same VM and Service names. This package does not implement the later container or bootc database migration.
+**Status:** the RHEL 10 VM baseline has been exercised on OpenShift 4.22 with the current Rocket Ramen artifacts, including a repeat Ansible run that preserved the database. Revalidate the artifact and API contracts whenever the application changes. This package does not implement the later container or bootc database migration.
 
 ## What runs
 
@@ -32,7 +32,7 @@ Before preparing the demo, a cluster administrator configures the RHEL subscript
 2. Expand **Automatic subscription of RHEL VirtualMachines**, enable it, select **Monitor and manage subscriptions in the Virtualization settings**, and enter the Red Hat activation key and organization ID. Apply the settings.
 3. Ensure the activation key grants the RHEL 10 BaseOS and AppStream repositories, and the guests can reach the subscription and content services. An internal mirror is an alternative.
 
-The console setting is used when the console creates and initializes new VMs; it did not retroactively register the existing demo VMs created by Tekton. This automation uses the same configured activation settings separately: after creating the demo namespace, run `./scripts/prepare-rhsm-secret.sh` to copy them into the `orders-rhsm` Secret without displaying them. The Ansible run registers each unregistered guest. The helper retains an existing Secret rather than silently changing it when settings are updated.
+The console setting is used when the console creates and initializes new VMs; it did not retroactively register the existing demo VMs created by Tekton. This automation uses the same configured activation settings separately: the top-level setup script invokes `./scripts/prepare-rhsm-secret.sh` to copy them into the `orders-rhsm` Secret without displaying them. The Ansible run registers each unregistered guest. The helper retains an existing Secret rather than silently changing it when settings are updated.
 
 The Virtualization settings currently store the activation settings in the `openshift-cnv/kubevirt-ui-features` ConfigMap, so treat access to that ConfigMap and to the copied namespace Secret as sensitive. Never commit the activation key or organization ID to Git or print their values. If your organization prefers, create the Secret from private files instead of using this helper.
 

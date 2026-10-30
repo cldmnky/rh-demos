@@ -1,0 +1,53 @@
+---
+- name: Prepare the RHEL image builder VM
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for authenticated SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+    - name: Wait for cloud-init
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      async: 600
+      poll: 10
+    - name: Collect guest facts
+      ansible.builtin.setup:
+    - name: Require RHEL 10
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'RedHat'
+          - ansible_facts.distribution_major_version == '10'
+    - name: Check subscription registration
+      ansible.builtin.command: subscription-manager identity
+      register: rhsm_identity
+      changed_when: false
+      failed_when: false
+    - name: Register unregistered builder
+      ansible.builtin.command:
+        argv:
+          - subscription-manager
+          - register
+          - --org
+          - "{{ lookup('env', 'RHSM_ORG') }}"
+          - --activationkey
+          - "{{ lookup('env', 'RHSM_ACTIVATION_KEY') }}"
+      when:
+        - rhsm_identity.rc != 0
+        - lookup('env', 'RHSM_ORG') | length > 0
+        - lookup('env', 'RHSM_ACTIVATION_KEY') | length > 0
+      no_log: true
+    - name: Install rootful image build tools
+      ansible.builtin.package:
+        name: [podman, qemu-img]
+        state: present
+    - name: Create build output directory
+      ansible.builtin.file:
+        path: /var/lib/rocket-ramen-builder
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Verify Podman is available
+      ansible.builtin.command: podman --version
+      changed_when: false

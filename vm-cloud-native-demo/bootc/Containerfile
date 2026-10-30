@@ -1,5 +1,5 @@
 # Starting point; use an authorized RHEL registry and validate the tag.
-FROM registry.redhat.io/rhel9/rhel-bootc:9.6
+FROM registry.redhat.io/rhel10/rhel-bootc:10.2
 RUN dnf -y install mariadb-server qemu-guest-agent cloud-init && dnf clean all
-RUN systemctl enable mariadb.service qemu-guest-agent.service cloud-init.target
+RUN systemctl disable mariadb.service && systemctl enable qemu-guest-agent.service cloud-init.target
 # Database data, identity, credentials and cutover are intentionally not baked into the OS image.

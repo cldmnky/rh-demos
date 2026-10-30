@@ -4,10 +4,6 @@ frontend/dist/
 playwright-report/
 test-results/
 
-# Generated: sources copied by scripts/sync-sources.sh and the bundle packed by
-# scripts/build-frontend.sh, both embedded into cloud-init
-chart/files/
-
 # Local overrides
 *.local.yaml
 private/

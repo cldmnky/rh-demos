@@ -1,0 +1,8 @@
+all:
+  vars:
+    ansible_user: demo-automation
+    ansible_ssh_private_key_file: /work/id_rsa
+    ansible_ssh_common_args: '-o UserKnownHostsFile=/work/known_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=10'
+    ansible_become: true
+  hosts:
+    orders-builder:

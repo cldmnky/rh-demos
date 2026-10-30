@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api-container
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: orders-api-container}
+  template:
+    metadata:
+      labels: {app: orders-api-container}
+    spec:
+      containers:
+        - name: api
+          image: DEMO_API_IMAGE
+          imagePullPolicy: Always
+          command: [/bin/sh, -c]
+          args:
+            - 'export DB_DSN="orders:${DB_PASSWORD}@tcp(orders-db:3306)/orders?parseTime=true&timeout=3s"; exec /usr/local/bin/orders'
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: orders-database-credentials, key: password}
+            - {name: APP_RUNTIME, value: container}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: orders-web-container
+  labels: {app: orders-web-container}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: orders-web-container}
+  strategy:
+    canary:
+      steps:
+        - setWeight: 50
+        - pause: {duration: 60s}
+  template:
+    metadata:
+      labels: {app: orders-web-container}
+    spec:
+      containers:
+        - name: web
+          image: DEMO_WEB_IMAGE
+          imagePullPolicy: Always
+          env:
+            - {name: WEB_RUNTIME, value: container}
+            - {name: API_URL, value: 'http://orders-app:8080'}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5

@@ -1,0 +1,42 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: orders-configure-builder
+spec:
+  steps:
+    - name: ansible
+      image: BUILDER_ANSIBLE_IMAGE
+      timeout: 30m
+      envFrom:
+        - secretRef: {name: orders-rhsm, optional: true}
+      env:
+        - {name: ANSIBLE_HOST_KEY_CHECKING, value: 'true'}
+        - {name: ANSIBLE_LOCAL_TEMP, value: /work/ansible-local}
+        - {name: HOME, value: /work}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        cp /ssh/id_rsa /work/id_rsa
+        cp /ssh/known_hosts /work/known_hosts
+        chmod 600 /work/id_rsa /work/known_hosts
+        ansible-playbook -i /automation/inventory.yml /automation/setup.yml
+      volumeMounts:
+        - {name: ansible, mountPath: /automation, readOnly: true}
+        - {name: ssh, mountPath: /ssh, readOnly: true}
+        - {name: work, mountPath: /work}
+  volumes:
+    - name: ansible
+      configMap: {name: orders-builder-ansible}
+    - name: ssh
+      secret: {secretName: orders-builder-ssh}
+    - name: work
+      emptyDir: {}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-builder
+spec:
+  tasks:
+    - name: configure
+      taskRef: {name: orders-configure-builder}

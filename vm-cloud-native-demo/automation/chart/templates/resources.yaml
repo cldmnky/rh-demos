@@ -132,6 +132,6 @@ data:
                 secretRef: {name: orders-{{ $tier }}-cloudinit}
             {{- if eq $tier "db" }}
             - name: datadisk
-              persistentVolumeClaim: {claimName: orders-db-data}
+              persistentVolumeClaim: {claimName: {{ $.Values.vm.dataClaim | quote }} }
             {{- end }}
 {{- end }}
