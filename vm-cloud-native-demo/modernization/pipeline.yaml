@@ -1,0 +1,113 @@
+# Build the exact source uploaded from the development workspace.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: orders-build-container-images
+spec:
+  params:
+    - name: source-name
+      type: string
+    - name: source-sha256
+      type: string
+  steps:
+    - name: fetch-workspace-source
+      image: registry.access.redhat.com/ubi9/python-311:latest
+      timeout: 5m
+      env:
+        - name: SOURCE_NAME
+          value: '$(params.source-name)'
+        - name: SOURCE_SHA256
+          value: '$(params.source-sha256)'
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef: {fieldPath: metadata.namespace}
+      script: |
+        #!/usr/bin/env python3
+        import hashlib, os, pathlib, re, tarfile, urllib.request
+        name = os.environ['SOURCE_NAME']
+        expected = os.environ['SOURCE_SHA256']
+        if not re.fullmatch(r'container-source-[A-Za-z0-9]+\.tar\.gz', name) or not re.fullmatch(r'[a-f0-9]{64}', expected):
+            raise SystemExit('Invalid source name or digest')
+        url = 'http://orders-artifacts.%s.svc:8080/%s' % (os.environ['POD_NAMESPACE'], name)
+        archive = '/work/source.tar.gz'
+        with urllib.request.urlopen(url, timeout=60) as source, open(archive, 'wb') as target:
+            while chunk := source.read(1024 * 1024):
+                target.write(chunk)
+        with open(archive, 'rb') as source:
+            digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        if digest != expected:
+            raise SystemExit('Workspace source digest mismatch')
+        root = pathlib.Path('/work/source').resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive, 'r:gz') as tar:
+            for member in tar.getmembers():
+                path = (root / member.name).resolve()
+                if not path.is_relative_to(root) or not (member.isfile() or member.isdir()):
+                    raise SystemExit('Unsafe archive member: ' + member.name)
+            tar.extractall(root)
+        print('Verified and unpacked workspace source')
+      volumeMounts:
+        - {name: source, mountPath: /work}
+    - name: build-frontend-bundle
+      image: registry.access.redhat.com/ubi9/nodejs-20:latest
+      timeout: 10m
+      workingDir: /work/source/frontend
+      env:
+        - {name: HOME, value: /tmp}
+        - {name: npm_config_cache, value: /tmp/npm-cache}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        npm ci --no-fund --no-audit
+        npm run build
+        chmod -R a+rX /work/source/frontend/dist
+      volumeMounts:
+        - {name: source, mountPath: /work}
+    - name: build-container-images
+      image: quay.io/openshift/origin-cli:4.22
+      timeout: 25m
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        wait_build() {
+          local build=$1 phase
+          oc logs -f "$build" || true
+          for ((attempt=0; attempt<180; attempt++)); do
+            phase=$(oc get "$build" -o jsonpath='{.status.phase}')
+            case "$phase" in
+              Complete) echo "$build completed"; return 0 ;;
+              Failed|Error|Cancelled) echo "$build ended in phase $phase" >&2; return 1 ;;
+            esac
+            sleep 5
+          done
+          echo "Timed out waiting for $build" >&2; return 1
+        }
+        api=$(oc start-build orders-api-container --from-dir=/work/source/backend -o name)
+        wait_build "$api"
+        # Upload only the files needed by the frontend Containerfile, not node_modules.
+        mkdir -p /work/web-context
+        cp /work/source/frontend/Containerfile /work/source/frontend/server.js /work/web-context/
+        cp -R /work/source/frontend/dist /work/web-context/dist
+        chmod -R a+rX /work/web-context
+        web=$(oc start-build orders-web-container --from-dir=/work/web-context -o name)
+        wait_build "$web"
+      volumeMounts:
+        - {name: source, mountPath: /work}
+  volumes:
+    - name: source
+      emptyDir: {}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-build-containers
+spec:
+  params:
+    - {name: source-name, type: string}
+    - {name: source-sha256, type: string}
+  tasks:
+    - name: build
+      taskRef: {name: orders-build-container-images}
+      params:
+        - {name: source-name, value: '$(params.source-name)'}
+        - {name: source-sha256, value: '$(params.source-sha256)'}

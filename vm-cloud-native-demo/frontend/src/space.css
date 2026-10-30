@@ -252,3 +252,10 @@ body {
     transition: none;
   }
 }
+
+.rr-placement {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.5rem;
+  color: var(--pf-t--global--text--color--subtle);
+}

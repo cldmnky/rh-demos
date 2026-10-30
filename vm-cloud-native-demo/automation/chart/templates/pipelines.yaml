@@ -17,6 +17,7 @@ data:
   API_CHECK_PATH: {{ .Values.artifacts.apiCheckPath | quote }}
   DATA_FORMAT_APPROVED: {{ .Values.artifacts.dataFormatApproved | toString | quote }}
   SCHEMA_RECOVERY_APPROVED: {{ .Values.artifacts.allowEmptySchemaRecovery | toString | quote }}
+  DEMO_NAMESPACE: {{ .Release.Namespace | quote }}
   PRESENTER_PUBLIC_KEY: {{ .Values.vm.presenterPublicKey | quote }}
 ---
 apiVersion: tekton.dev/v1

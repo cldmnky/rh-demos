@@ -41,12 +41,14 @@ export function StackBadges({ web, stats }: { web: WebInfo | null; stats: Stats 
         <span data-testid="web-runtime">
           <RuntimeLabel runtime={web?.runtime} />
         </span>
+        <span>· {web?.name || "—"} · node {web?.node || "—"}</span>
       </span>
       <span className="rr-badges__tier">
         api
         <span data-testid="api-runtime">
           <RuntimeLabel runtime={stats?.runtime} />
         </span>
+        <span>· {stats?.placement?.name || "—"} · node {stats?.placement?.node || "—"}</span>
       </span>
       <span className="rr-badges__tier">
         db

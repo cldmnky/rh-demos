@@ -105,6 +105,7 @@ data:
           labels: {app: orders-{{ $tier }}}
         spec:
           domain:
+            firmware: {serial: orders-{{ $tier }}}
             cpu: {cores: {{ $.Values.vm.cpu }}}
             memory: {guest: {{ $.Values.vm.memory }}}
             devices:

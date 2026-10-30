@@ -1,4 +1,14 @@
 ---
+- name: Create placement metadata directory
+  ansible.builtin.file:
+    path: /etc/rocket-ramen
+    state: directory
+    mode: '0755'
+- name: Record VM placement metadata
+  ansible.builtin.copy:
+    dest: /etc/rocket-ramen/placement.json
+    mode: '0644'
+    content: "{{ {'runtime': 'VM', 'name': inventory_hostname, 'namespace': lookup('env', 'DEMO_NAMESPACE'), 'serial': inventory_hostname} | to_json }}"
 - name: Download pinned Go API executable
   ansible.builtin.get_url:
     url: "{{ lookup('env', 'API_URL') }}"

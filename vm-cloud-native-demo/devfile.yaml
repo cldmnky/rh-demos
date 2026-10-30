@@ -15,6 +15,12 @@ components:
           value: /tmp/go
         - name: GOCACHE
           value: /tmp/go-build
+        # The che-code launcher binds CODE_HOST, defaulting to 127.0.0.1, which
+        # no Route or workspace health check can reach. Dev Spaces injects the
+        # editor into the first component, so it needs to listen on all
+        # interfaces here. Without it the workspace fails its health check.
+        - name: CODE_HOST
+          value: 0.0.0.0
       command: ['tail', '-f', '/dev/null']
       memoryLimit: 2Gi
       mountSources: true
@@ -24,6 +30,13 @@ components:
       command: ['tail', '-f', '/dev/null']
       memoryLimit: 2Gi
       mountSources: true
+      endpoints:
+        # `npm run dev` binds 5173; without an endpoint the dev server is only
+        # reachable from inside the workspace.
+        - name: vite
+          targetPort: 5173
+          exposure: public
+          protocol: http
   - name: openshift-cli
     container:
       image: quay.io/openshift/origin-cli:4.22

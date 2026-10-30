@@ -50,6 +50,15 @@ export interface DBInfo {
   open_connections: number;
 }
 
+export interface Placement {
+  runtime: string;
+  name: string;
+  namespace: string;
+  node: string;
+  serial: string;
+  reported_by: string;
+}
+
 export interface Stats {
   revenue_cents: number;
   orders_today: number;
@@ -59,14 +68,14 @@ export interface Stats {
   top_sellers: TopSeller[];
   hourly: HourBucket[];
   runtime: string;
+  placement: Placement;
   db: DBInfo;
   at: string;
 }
 
 /** Answered by server.js itself: which tier is serving the page right now. */
-export interface WebInfo {
-  runtime: string;
-  node: string;
+export interface WebInfo extends Placement {
+  node_version: string;
   host: string;
 }
 

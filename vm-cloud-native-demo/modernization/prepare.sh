@@ -8,6 +8,7 @@ oc whoami >/dev/null
 oc -n "$NAMESPACE" get vm orders-web orders-app orders-db >/dev/null
 "$DEMO_DIR/modernization/configure-rollouts.sh"
 oc -n "$NAMESPACE" apply -f "$DEMO_DIR/modernization/resources.yaml"
+oc -n "$NAMESPACE" apply -f "$DEMO_DIR/modernization/pipeline.yaml"
 printf 'Waiting for the namespace-scoped Rollouts controller...\n'
 for ((attempt=0; attempt<90; attempt++)); do
   phase=$(oc -n "$NAMESPACE" get rolloutmanager rocket-ramen -o jsonpath='{.status.phase}')

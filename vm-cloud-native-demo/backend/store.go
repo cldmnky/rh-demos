@@ -71,16 +71,17 @@ type DBInfo struct {
 }
 
 type Stats struct {
-	RevenueCents   int         `json:"revenue_cents"`
-	OrdersToday    int         `json:"orders_today"`
-	AvgTicketCents int         `json:"avg_ticket_cents"`
-	QueueDepth     int         `json:"queue_depth"`
-	BusiestHour    string      `json:"busiest_hour"`
-	TopSellers     []TopSeller `json:"top_sellers"`
+	RevenueCents   int          `json:"revenue_cents"`
+	OrdersToday    int          `json:"orders_today"`
+	AvgTicketCents int          `json:"avg_ticket_cents"`
+	QueueDepth     int          `json:"queue_depth"`
+	BusiestHour    string       `json:"busiest_hour"`
+	TopSellers     []TopSeller  `json:"top_sellers"`
 	Hourly         []HourBucket `json:"hourly"`
-	Runtime        string      `json:"runtime"`
-	DB             DBInfo      `json:"db"`
-	At             time.Time   `json:"at"`
+	Runtime        string       `json:"runtime"`
+	Placement      Placement    `json:"placement"`
+	DB             DBInfo       `json:"db"`
+	At             time.Time    `json:"at"`
 }
 
 type OrderLine struct {
@@ -242,7 +243,10 @@ func (s *Store) CreateOrder(ctx context.Context, in NewOrder) (*Order, error) {
 	if err != nil {
 		return nil, err
 	}
-	type dish struct{ name string; price, prep, stock int }
+	type dish struct {
+		name               string
+		price, prep, stock int
+	}
 	dishes := map[int]dish{}
 	for rows.Next() {
 		var d dish
@@ -480,6 +484,7 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	st.Hourly = hourlyWindow(counts, st.At, 12)
 
 	st.Runtime = runtimeName()
+	st.Placement = placement()
 	st.DB, err = s.dbInfo(ctx)
 	return st, err
 }

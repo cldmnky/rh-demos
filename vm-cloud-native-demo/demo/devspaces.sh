@@ -9,12 +9,11 @@ if ! command -v pv >/dev/null; then set -- -d "$@"; fi
 . "$REPO_ROOT/scripts/helpers.sh"
 NAMESPACE=${NAMESPACE:-rocket-ramen}
 export NAMESPACE
-[[ -f frontend/dist/index.html ]] || { echo 'Build the frontend with the Dev Spaces build-frontend command first.' >&2; exit 1; }
-oc -n "$NAMESPACE" get buildconfig orders-api-container orders-web-container >/dev/null
+oc -n "$NAMESPACE" get pipeline orders-build-containers >/dev/null
 
-act 1 'Build the application images from Dev Spaces'
-pe './modernization/build.sh api'
-pe './modernization/build.sh web'
+act 1 'Build the edited application with Tekton'
+pe './modernization/run-pipeline.sh'
+pe 'oc -n "$NAMESPACE" get pipelineruns'
 
 act 2 'Apply the container workloads'
 pe 'cat modernization/workloads.yaml'

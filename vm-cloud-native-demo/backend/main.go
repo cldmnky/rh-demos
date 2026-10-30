@@ -27,6 +27,40 @@ func env(key, fallback string) string {
 // runtimeName is what the stack badge shows: does this tier run on a VM or in a container?
 func runtimeName() string { return env("APP_RUNTIME", "VM") }
 
+// Placement identifies the instance serving a request. A VM cannot discover
+// its Kubernetes node from inside the guest, so Node stays empty there.
+type Placement struct {
+	Runtime    string `json:"runtime"`
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+	Node       string `json:"node"`
+	Serial     string `json:"serial"`
+	ReportedBy string `json:"reported_by"`
+}
+
+func placement() Placement {
+	p := Placement{Runtime: runtimeName()}
+	if p.Runtime == "container" {
+		p.Name, p.Namespace, p.Node = os.Getenv("POD_NAME"), os.Getenv("POD_NAMESPACE"), os.Getenv("NODE_NAME")
+		p.ReportedBy = "Downward API"
+		return p
+	}
+	if data, err := os.ReadFile("/etc/rocket-ramen/placement.json"); err == nil {
+		_ = json.Unmarshal(data, &p)
+	}
+	p.Runtime = "VM"
+	p.ReportedBy = "Unavailable"
+	if p.Name != "" || p.Namespace != "" || p.Serial != "" {
+		p.ReportedBy = "Provisioning metadata"
+	}
+	if serial, err := os.ReadFile("/sys/class/dmi/id/product_serial"); err == nil && strings.TrimSpace(string(serial)) != "" {
+		p.Serial = strings.TrimSpace(string(serial))
+		p.ReportedBy = "KubeVirt SMBIOS + provisioning metadata"
+	}
+	p.Node = ""
+	return p
+}
+
 type API struct {
 	store *Store
 	hub   *Hub

@@ -12,6 +12,22 @@ const WEB_ROOT = process.env.WEB_ROOT || path.join(__dirname, 'dist');
 const API_URL = new URL(process.env.API_URL || 'http://orders-app:8080');
 const WEB_RUNTIME = process.env.WEB_RUNTIME || 'VM';
 
+function placement() {
+  if (WEB_RUNTIME === 'container') {
+    return { runtime: WEB_RUNTIME, name: process.env.POD_NAME || '', namespace: process.env.POD_NAMESPACE || '',
+      node: process.env.NODE_NAME || '', serial: '', reported_by: 'Downward API' };
+  }
+  let info = {};
+  try { info = JSON.parse(fs.readFileSync('/etc/rocket-ramen/placement.json', 'utf8')); } catch (_) { /* optional outside a VM */ }
+  let serial = info.serial || '';
+  let reportedBy = (info.name || info.namespace || info.serial) ? 'Provisioning metadata' : 'Unavailable';
+  try {
+    const guestSerial = fs.readFileSync('/sys/class/dmi/id/product_serial', 'utf8').trim();
+    if (guestSerial) { serial = guestSerial; reportedBy = 'KubeVirt SMBIOS + provisioning metadata'; }
+  } catch (_) { /* serial may be unavailable to the process */ }
+  return { runtime: 'VM', name: info.name || os.hostname(), namespace: info.namespace || '', node: '', serial, reported_by: reportedBy };
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -87,7 +103,7 @@ function proxy(req, res) {
 
 const server = http.createServer((req, res) => {
   if (req.url === '/api/webinfo') {
-    sendJson(res, 200, { runtime: WEB_RUNTIME, node: process.version, host: os.hostname() });
+    sendJson(res, 200, { ...placement(), node_version: process.version, host: os.hostname() });
     return;
   }
   if ((req.url || '').startsWith('/api/')) {

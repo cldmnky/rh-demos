@@ -28,6 +28,6 @@ PRESENTER_PUBLIC_KEY_FILE=~/.ssh/presenter.pub PRIVATE_DIR=/path/to/existing/pri
 
 `NAMESPACE`, `SSH_KEY`, `PRIVATE_DIR`, `ANSIBLE_IMAGE`, and `VM_ARCH` can be overridden as environment variables. `RHEL_SOURCE_NAMESPACE` and `RHEL_SOURCE_NAME` select an existing ready RHEL 10 DataSource on the first run. The default pinned Ansible execution image requires registry access. Never commit private files, subscription details, or credentials.
 
-For the presenter, `./demo/demo.sh` uses demo-magic and the Dev Spaces workspace is described in `devfile.yaml`. The demo script creates an order; setup verification is read-only. See [automation/README.md](automation/README.md) for pipeline details and troubleshooting.
+For the presenter, `./demo/demo.sh` uses demo-magic; the Dev Spaces workspace described in `devfile.yaml` is rendered into `prereqs/devspace/` and started by Argo CD (`prereqs/README.md`). The demo script creates an order; setup verification is read-only. See [automation/README.md](automation/README.md) for pipeline details and troubleshooting.
 
 Follow the [demo runbook](demo-runbook.md) for the presentation flow, Dev Spaces steps, traffic cutover, database migration and reset.

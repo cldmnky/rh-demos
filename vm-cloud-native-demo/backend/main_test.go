@@ -112,3 +112,14 @@ func TestHourlyWindowZeroFills(t *testing.T) {
 		}
 	}
 }
+
+func TestContainerPlacementFromDownwardAPI(t *testing.T) {
+	t.Setenv("APP_RUNTIME", "container")
+	t.Setenv("POD_NAME", "orders-api-123")
+	t.Setenv("POD_NAMESPACE", "rocket-ramen")
+	t.Setenv("NODE_NAME", "worker-2")
+	got := placement()
+	if got.Name != "orders-api-123" || got.Namespace != "rocket-ramen" || got.Node != "worker-2" || got.ReportedBy != "Downward API" {
+		t.Fatalf("unexpected container placement: %+v", got)
+	}
+}

@@ -48,16 +48,20 @@ export function StackCard({ web, stats }: { web: WebInfo | null; stats: Stats | 
             <DescriptionListTerm>Web tier</DescriptionListTerm>
             <DescriptionListDescription>
               <div>{RuntimeLabel({ runtime: web?.runtime })}</div>
-              <span className="rr-muted">
-                {web ? `Node ${web.node} on ${web.host}` : 'loading…'}
-              </span>
+              <div className="rr-placement">
+                <span>{web ? `${web.name || "—"} · namespace ${web.namespace || "—"} · node ${web.node || "—"}` : 'loading…'}</span>
+                <span><strong>Reported by</strong><br />{web?.reported_by || "—"}{web?.serial ? ` · serial ${web.serial}` : ""}</span>
+              </div>
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>
             <DescriptionListTerm>API tier</DescriptionListTerm>
             <DescriptionListDescription>
               <div>{RuntimeLabel({ runtime: stats?.runtime })}</div>
-              <span className="rr-muted">Go · stdlib + go-sql-driver/mysql</span>
+              <div className="rr-placement">
+                <span>{stats?.placement ? `${stats.placement.name || "—"} · namespace ${stats.placement.namespace || "—"} · node ${stats.placement.node || "—"}` : 'loading…'}</span>
+                <span><strong>Reported by</strong><br />{stats?.placement?.reported_by || "—"}{stats?.placement?.serial ? ` · serial ${stats.placement.serial}` : ""}</span>
+              </div>
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>
