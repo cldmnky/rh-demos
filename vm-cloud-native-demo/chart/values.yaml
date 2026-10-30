@@ -1,0 +1,17 @@
+vm:
+  sourceNamespace: openshift-virtualization-os-images
+  sourceName: centos-stream9
+  storageClass: ""
+  diskSize: 15Gi
+  memory: 2Gi
+  cpu: 2
+pipeline:
+  cliImage: quay.io/openshift/origin-cli:4.22
+web:
+  enabled: false
+  active: false
+  image: ""
+app:
+  enabled: false
+  active: false
+  image: ""

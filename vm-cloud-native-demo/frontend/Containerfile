@@ -1,0 +1,13 @@
+# The web tier image ships the SAME dist/ that the VM unpacks, so the container
+# cutover changes the runtime, not the application. Build it first:
+#   ./scripts/build-frontend.sh   (or npm run build in frontend/)
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest
+
+WORKDIR /opt/app-root/src
+COPY server.js ./
+COPY dist ./dist
+
+ENV WEB_RUNTIME=container
+EXPOSE 8080
+USER 1001
+CMD ["node", "server.js"]

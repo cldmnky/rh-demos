@@ -1,0 +1,124 @@
+---
+- name: Validate database password character set
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'DB_PASSWORD') is match('^[A-Za-z0-9]{16,128}$')
+    fail_msg: Database password must be 16–128 alphanumeric characters.
+  no_log: true
+- name: Install MariaDB
+  ansible.builtin.package:
+    name: "{{ lookup('env', 'MARIADB_PACKAGE') }}"
+    state: present
+- name: Check dedicated disk exists
+  ansible.builtin.stat:
+    path: /dev/disk/by-id/virtio-orders-data
+  register: data_disk
+- name: Require dedicated data disk
+  ansible.builtin.assert:
+    that: data_disk.stat.exists
+    fail_msg: The dedicated virtio-orders-data disk is missing.
+- name: Inspect existing filesystem
+  ansible.builtin.command: blkid -p -o value -s TYPE /dev/disk/by-id/virtio-orders-data
+  register: data_fs
+  changed_when: false
+  failed_when: data_fs.rc not in [0, 2]
+- name: Inspect disk signatures before initializing
+  ansible.builtin.command: wipefs --noheadings --output TYPE /dev/disk/by-id/virtio-orders-data
+  register: data_signatures
+  changed_when: false
+  when: data_fs.rc == 2
+- name: Authorize initialization only of an empty dedicated disk
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'DATA_FORMAT_APPROVED') == 'true'
+      - data_signatures.stdout | trim == ''
+    fail_msg: Disk is unformatted; explicit dataFormatApproved and no existing signatures are required.
+  when: data_fs.rc == 2
+- name: Format new dedicated disk
+  ansible.builtin.command: mkfs.xfs /dev/disk/by-id/virtio-orders-data
+  when: data_fs.rc == 2
+  changed_when: true
+- name: Require XFS on existing disk
+  ansible.builtin.assert:
+    that: data_fs.stdout | trim == 'xfs'
+    fail_msg: Existing disk is not XFS; refusing to change it.
+  when: data_fs.rc == 0
+- name: Create MariaDB data mountpoint
+  ansible.builtin.file:
+    path: /var/lib/mysql
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: '0750'
+- name: Record dedicated disk mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^/dev/disk/by-id/virtio-orders-data\s'
+    line: '/dev/disk/by-id/virtio-orders-data /var/lib/mysql xfs defaults,nofail 0 2'
+- name: Inspect original MariaDB directory before mounting
+  ansible.builtin.command: find /var/lib/mysql -mindepth 1 -maxdepth 1 -print -quit
+  register: original_mysql_files
+  changed_when: false
+  when: "'/var/lib/mysql' not in ansible_facts.mounts | map(attribute='mount') | list"
+- name: Refuse to hide existing MariaDB files
+  ansible.builtin.assert:
+    that: original_mysql_files.stdout | trim == ''
+    fail_msg: Existing files under /var/lib/mysql require manual inspection before mounting.
+  when: "'/var/lib/mysql' not in ansible_facts.mounts | map(attribute='mount') | list"
+- name: Mount the data disk
+  ansible.builtin.command: mount /var/lib/mysql
+  register: mount_result
+  changed_when: mount_result.rc == 0
+  failed_when: mount_result.rc != 0
+  when: "'/var/lib/mysql' not in ansible_facts.mounts | map(attribute='mount') | list"
+- name: Fix MariaDB data disk ownership and SELinux context
+  ansible.builtin.file:
+    path: /var/lib/mysql
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: '0750'
+    setype: mysqld_db_t
+- name: Initialize new MariaDB data directory
+  ansible.builtin.command: mariadb-install-db --user=mysql --datadir=/var/lib/mysql
+  args:
+    creates: /var/lib/mysql/mysql
+- name: Configure MariaDB listener
+  ansible.builtin.copy:
+    dest: /etc/my.cnf.d/orders-network.cnf
+    mode: '0644'
+    content: |
+      [mysqld]
+      bind-address=0.0.0.0
+  register: database_network
+- name: Enable MariaDB
+  ansible.builtin.systemd:
+    name: mariadb
+    enabled: true
+    state: "{{ 'restarted' if database_network.changed else 'started' }}"
+- name: Check for an existing orders database
+  ansible.builtin.command: mariadb -Nse "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='orders'"
+  register: db_exists
+  changed_when: false
+- name: Download the pinned initial schema
+  ansible.builtin.get_url:
+    url: "{{ lookup('env', 'SCHEMA_URL') }}"
+    dest: /opt/orders/schema.sql
+    checksum: "sha256:{{ lookup('env', 'SCHEMA_SHA256') }}"
+    mode: '0644'
+  when: db_exists.stdout | trim == '0'
+- name: Create new database and application account
+  ansible.builtin.command:
+    argv: [mariadb]
+    stdin: "CREATE DATABASE orders CHARACTER SET utf8mb4; CREATE USER 'orders'@'%' IDENTIFIED BY '{{ lookup('env', 'DB_PASSWORD') }}'; GRANT ALL PRIVILEGES ON orders.* TO 'orders'@'%';"
+  when: db_exists.stdout | trim == '0'
+  no_log: true
+- name: Apply schema only to the newly created database
+  ansible.builtin.shell: mariadb orders < /opt/orders/schema.sql
+  when: db_exists.stdout | trim == '0'
+  changed_when: true
+- name: Verify expected seeded menu without changing existing data
+  ansible.builtin.command: mariadb -Nse "SELECT COUNT(*) FROM orders.menu_items"
+  register: menu_count
+  changed_when: false
+  failed_when: menu_count.rc != 0 or (menu_count.stdout | trim | int) == 0

@@ -1,0 +1,63 @@
+---
+- name: Validate frontend entrypoint
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'FRONTEND_ENTRY') is match('^[A-Za-z0-9_.-]+$')
+- name: Install Node.js
+  ansible.builtin.package:
+    name: "{{ lookup('env', 'NODE_PACKAGE') }}"
+    state: present
+- name: Create versioned frontend directory
+  ansible.builtin.file:
+    path: "/opt/orders/frontend-{{ lookup('env', 'FRONTEND_SHA256') }}"
+    state: directory
+    mode: '0755'
+- name: Download pinned frontend archive
+  ansible.builtin.get_url:
+    url: "{{ lookup('env', 'FRONTEND_URL') }}"
+    dest: /opt/orders/frontend.tar.gz
+    checksum: "sha256:{{ lookup('env', 'FRONTEND_SHA256') }}"
+    mode: '0644'
+- name: Extract frontend archive
+  ansible.builtin.unarchive:
+    src: /opt/orders/frontend.tar.gz
+    dest: "/opt/orders/frontend-{{ lookup('env', 'FRONTEND_SHA256') }}"
+    remote_src: true
+    creates: "/opt/orders/frontend-{{ lookup('env', 'FRONTEND_SHA256') }}/{{ lookup('env', 'FRONTEND_ENTRY') }}"
+- name: Switch frontend artifact
+  ansible.builtin.file:
+    src: "/opt/orders/frontend-{{ lookup('env', 'FRONTEND_SHA256') }}"
+    dest: /opt/orders/frontend
+    state: link
+  register: frontend_link
+- name: Configure frontend systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/orders-web.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Orders Node.js frontend
+      After=network-online.target
+      Wants=network-online.target
+      [Service]
+      Environment=API_URL=http://orders-app:8080
+      Environment=PORT=8080
+      ExecStart=/usr/bin/node /opt/orders/frontend/{{ lookup('env', 'FRONTEND_ENTRY') }}
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+  register: frontend_unit
+- name: Enable and start frontend
+  ansible.builtin.systemd:
+    name: orders-web
+    daemon_reload: true
+    enabled: true
+    state: "{{ 'restarted' if frontend_link.changed or frontend_unit.changed else 'started' }}"
+- name: Wait for frontend
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8080{{ lookup('env', 'FRONTEND_HEALTH_PATH') }}"
+    status_code: 200
+  register: frontend_health
+  until: frontend_health.status | default(0) == 200
+  retries: 24
+  delay: 5

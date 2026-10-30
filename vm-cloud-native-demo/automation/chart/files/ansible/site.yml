@@ -1,0 +1,67 @@
+---
+- name: Wait for cloud-init and prepare guest hosts
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for authenticated SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+    - name: Wait for cloud-init completion
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      async: 600
+      poll: 10
+    - name: Collect facts
+      ansible.builtin.setup:
+    - name: Require RHEL 10
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'RedHat'
+          - ansible_facts.distribution_major_version == '10'
+        fail_msg: The baseline requires a RHEL 10 guest.
+    - name: Install common tools
+      ansible.builtin.package:
+        name: [tar, curl, xfsprogs]
+        state: present
+    - name: Create application directory
+      ansible.builtin.file:
+        path: /opt/orders
+        state: directory
+        mode: '0755'
+    - name: Configure guest firewall when active
+      ansible.builtin.include_tasks: firewall.yml
+
+- name: Configure MariaDB and initialize an empty database
+  hosts: db
+  tasks:
+    - ansible.builtin.import_tasks: database.yml
+
+- name: Configure the Go API
+  hosts: api
+  tasks:
+    - ansible.builtin.import_tasks: api.yml
+
+- name: Configure the Node.js SPA
+  hosts: frontend
+  tasks:
+    - ansible.builtin.import_tasks: frontend.yml
+
+- name: Verify complete application path
+  hosts: frontend
+  tasks:
+    - name: Verify API responds through frontend proxy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080{{ lookup('env', 'API_CHECK_PATH') }}"
+        status_code: 200
+        return_content: true
+      register: orders_response
+      retries: 24
+      delay: 5
+      until: orders_response.status | default(0) == 200
+    - name: Verify the menu contains data
+      ansible.builtin.assert:
+        that:
+          - orders_response.json is defined
+          - orders_response.json['items'] is defined
+          - orders_response.json['items'] | length > 0
+        fail_msg: The API responded but did not return the expected seeded menu.

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: orders-vm-automation
+version: 0.1.0
+description: Tekton and Ansible bootstrap for RHEL 10 application VMs

@@ -1,0 +1,254 @@
+/* Rocket Ramen: a light touch of neon on top of PatternFly 6 tokens. */
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(115, 188, 247, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, rgba(238, 0, 0, 0.14), transparent 60%),
+    var(--pf-t--global--background--color--primary--default);
+}
+
+.rr-page {
+  --rr-gap: var(--pf-t--global--spacer--lg, 1.5rem);
+}
+
+.rr-hero {
+  padding-block-end: var(--pf-t--global--spacer--sm);
+}
+
+.rr-hero h1 {
+  letter-spacing: 0.02em;
+}
+
+.rr-muted {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.rr-masthead {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.rr-masthead__title {
+  font-size: var(--pf-t--global--font--size--heading--md);
+  font-weight: var(--pf-t--global--font--weight--heading--bold, 600);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rr-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--md);
+  align-items: center;
+}
+
+.rr-badges__tier {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pf-t--global--text--color--subtle);
+}
+
+.rr-grid {
+  display: grid;
+  gap: var(--rr-gap);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1200px) {
+  .rr-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--md);
+  align-items: center;
+}
+
+.rr-badges__tier {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--xs);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pf-t--global--text--color--subtle);
+}
+
+.rr-grid {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: start;
+  }
+}
+
+.rr-grid__left,
+.rr-grid__right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rr-gap);
+  min-width: 0;
+}
+
+.rr-card {
+  backdrop-filter: blur(2px);
+}
+
+.rr-search {
+  flex: 1 1 auto;
+}
+
+.rr-menu {
+  margin-block-start: var(--pf-t--global--spacer--md);
+}
+
+.rr-dish {
+  transition: border-color 120ms ease-in-out, box-shadow 120ms ease-in-out;
+}
+
+.rr-dish--selected {
+  border-color: var(--pf-t--global--border--color--brand--default);
+  box-shadow: 0 0 0 1px var(--pf-t--global--border--color--brand--default);
+}
+
+.rr-dish__emoji {
+  font-size: 1.6rem;
+  margin-inline-end: var(--pf-t--global--spacer--xs);
+}
+
+.rr-dish__name {
+  font-weight: 600;
+}
+
+.rr-dish__tags {
+  margin-block-start: var(--pf-t--global--spacer--sm);
+}
+
+.rr-label {
+  display: block;
+  font-size: var(--pf-t--global--font--size--body--sm);
+  color: var(--pf-t--global--text--color--subtle);
+  margin-block-end: 2px;
+}
+
+.rr-input {
+  background: var(--pf-t--global--background--color--control--default);
+  border: 1px solid var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+  color: var(--pf-t--global--text--color--regular);
+  padding: 6px 10px;
+  min-width: 14rem;
+  font: inherit;
+}
+
+.rr-input:focus-visible {
+  outline: 2px solid var(--pf-t--global--border--color--clicked);
+  outline-offset: 1px;
+}
+
+.rr-alert {
+  margin-block-end: var(--pf-t--global--spacer--sm);
+}
+
+.rr-filters {
+  margin-block-end: var(--pf-t--global--spacer--md);
+}
+
+.rr-board-loading {
+  padding-block: var(--pf-t--global--spacer--2xl);
+}
+
+.rr-order__code {
+  font-family: var(--pf-t--global--font--family--mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.rr-metric__label {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.rr-stack .pf-v6-c-description-list {
+  row-gap: var(--pf-t--global--spacer--md);
+}
+
+/* Orders-per-hour chart without pulling in a charting dependency. */
+.rr-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 120px;
+}
+
+.rr-bars__column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  gap: 2px;
+}
+
+.rr-bars__value {
+  font-size: 0.7rem;
+  color: var(--pf-t--global--text--color--subtle);
+}
+
+.rr-bars__bar {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(
+    180deg,
+    var(--pf-t--global--color--brand--default, #73bcf7),
+    var(--pf-t--global--color--nonstatus--blue--default, #0066cc)
+  );
+}
+
+.rr-bars__label {
+  font-size: 0.7rem;
+  color: var(--pf-t--global--text--color--subtle);
+}
+
+.rr-leaderboard {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--xs);
+}
+
+.rr-leaderboard li {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+}
+
+.rr-leaderboard__rank {
+  font-weight: 700;
+  color: var(--pf-t--global--color--brand--default);
+}
+
+.rr-leaderboard__qty {
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rr-dish,
+  .rr-bars__bar {
+    transition: none;
+  }
+}
