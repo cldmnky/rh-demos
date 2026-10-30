@@ -48,7 +48,11 @@ Dir.mktmpdir('acm-offline-') do |dir|
     if ARGV.include?('config')
       print ARGV.include?('current-context') ? 'fixture-context' : 'https://fixture.invalid:6443'
     elsif ARGV.include?('whoami')
-      puts 'https://fixture.invalid:6443'
+      if ENV['FIXTURE_UNAUTHORIZED'] == '1' && !ARGV.include?('--show-server')
+        warn 'Unauthorized fixture session'
+        exit 1
+      end
+      puts ARGV.include?('--show-server') ? 'https://fixture.invalid:6443' : 'fixture-user'
     else
       warn 'Fixture denies cluster access'
       exit 1
@@ -71,6 +75,13 @@ Dir.mktmpdir('acm-offline-') do |dir|
   assert(calls.all? { |args| args.include?('config') }, 'initializer uses only local config reads')
   _, _, status = run(env, 'bash', script)
   assert(!status.success?, 'executed initializer must ask to be sourced')
+  # A valid configured server must not conceal an expired login before apply.
+  File.write(File.join(values,'governance-inform.local.yaml'), "{}\n")
+  command = 'source "$1" --prereqs --non-interactive >/dev/null && "$2" governance-inform --apply'
+  _, err, status = run(env.merge('FIXTURE_UNAUTHORIZED'=>'1'), 'bash', '-c', command, 'bash', script, File.join(root,'scripts','setup-demo.sh'))
+  assert(!status.success?, 'unauthorized setup must fail')
+  assert(err.include?('HUB authentication failed'), 'must detect expired credentials, not just server URL')
+  assert(!err.include?('Apply requires an interactive'), 'auth failure must stop before confirmation')
   File.write(File.join(values,'prereqs.local.yaml'), YAML.dump({
     'credentials'=>{'name'=>'aws','namespace'=>'default'},
     'production'=>{'region'=>'region-a'},'qa'=>{'region'=>'region-b'},

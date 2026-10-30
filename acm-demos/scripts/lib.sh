@@ -21,6 +21,11 @@ demo_identity() {
   demo_require "$api_key"
   actual=$(demo_oc "$role" whoami --show-server) || return 1
   [[ "$actual" == "${!api_key}" ]] || { printf '%s API identity mismatch; stopped.\n' "$role" >&2; return 1; }
+  # --show-server can succeed with expired credentials: it is not an auth check.
+  if ! demo_oc "$role" whoami >/dev/null; then
+    printf '%s authentication failed. Log in using the selected kubeconfig/context, then retry. No apply confirmation or mutation was attempted.\n' "$role" >&2
+    return 1
+  fi
 }
 demo_helm() {
   demo_require HUB_CONTEXT
