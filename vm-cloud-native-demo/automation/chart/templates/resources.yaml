@@ -28,23 +28,6 @@ roleRef:
   name: orders-vm-bootstrap
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: orders-bootstrap-cloudinit
-type: Opaque
-stringData:
-  userdata: |
-    #cloud-config
-    users:
-      - name: demo-automation
-        groups: [wheel]
-        sudo: ALL=(ALL) NOPASSWD:ALL
-        shell: /bin/bash
-        ssh_authorized_keys:
-          - {{ required "vm.sshPublicKey is required" .Values.vm.sshPublicKey | quote }}
-    ssh_pwauth: false
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: orders-db-data
@@ -65,7 +48,7 @@ metadata:
   name: orders-{{ $tier }}
 spec:
   selector:
-    kubevirt.io/domain: orders-{{ $tier }}
+    vm.kubevirt.io/name: orders-{{ $tier }}
   ports:
     - name: ssh
       port: 22
@@ -146,7 +129,7 @@ data:
               dataVolume: {name: orders-{{ $tier }}-root}
             - name: cloudinit
               cloudInitNoCloud:
-                secretRef: {name: orders-bootstrap-cloudinit}
+                secretRef: {name: orders-{{ $tier }}-cloudinit}
             {{- if eq $tier "db" }}
             - name: datadisk
               persistentVolumeClaim: {claimName: orders-db-data}

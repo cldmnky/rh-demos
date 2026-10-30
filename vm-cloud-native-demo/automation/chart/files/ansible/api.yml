@@ -41,6 +41,7 @@
     enabled: true
     state: "{{ 'restarted' if api_binary.changed or api_environment.changed or api_unit.changed else 'started' }}"
 - name: Wait for API and its MariaDB connection
+  tags: [api-health]
   ansible.builtin.uri:
     url: "http://127.0.0.1:8080{{ lookup('env', 'API_HEALTH_PATH') }}"
     status_code: 200

@@ -100,22 +100,34 @@
   ansible.builtin.command: mariadb -Nse "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='orders'"
   register: db_exists
   changed_when: false
+- name: Count tables in an existing orders database
+  ansible.builtin.command: mariadb -Nse "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='orders'"
+  register: db_table_count
+  changed_when: false
+  when: db_exists.stdout | trim == '1'
+- name: Require explicit approval to recover an empty database
+  ansible.builtin.assert:
+    that: lookup('env', 'SCHEMA_RECOVERY_APPROVED') == 'true'
+    fail_msg: The existing orders database is empty; inspect it and explicitly approve schema recovery.
+  when:
+    - db_exists.stdout | trim == '1'
+    - db_table_count.stdout | default('-1') | trim == '0'
 - name: Download the pinned initial schema
   ansible.builtin.get_url:
     url: "{{ lookup('env', 'SCHEMA_URL') }}"
     dest: /opt/orders/schema.sql
     checksum: "sha256:{{ lookup('env', 'SCHEMA_SHA256') }}"
     mode: '0644'
-  when: db_exists.stdout | trim == '0'
+  when: db_exists.stdout | trim == '0' or (db_table_count.stdout | default('-1') | trim == '0')
 - name: Create new database and application account
   ansible.builtin.command:
     argv: [mariadb]
     stdin: "CREATE DATABASE orders CHARACTER SET utf8mb4; CREATE USER 'orders'@'%' IDENTIFIED BY '{{ lookup('env', 'DB_PASSWORD') }}'; GRANT ALL PRIVILEGES ON orders.* TO 'orders'@'%';"
   when: db_exists.stdout | trim == '0'
   no_log: true
-- name: Apply schema only to the newly created database
-  ansible.builtin.shell: mariadb orders < /opt/orders/schema.sql
-  when: db_exists.stdout | trim == '0'
+- name: Apply schema to a new or explicitly approved empty database
+  ansible.builtin.shell: mariadb --default-character-set=utf8mb4 orders < /opt/orders/schema.sql
+  when: db_exists.stdout | trim == '0' or (db_table_count.stdout | default('-1') | trim == '0')
   changed_when: true
 - name: Verify expected seeded menu without changing existing data
   ansible.builtin.command: mariadb -Nse "SELECT COUNT(*) FROM orders.menu_items"

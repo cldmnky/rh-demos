@@ -19,6 +19,47 @@
           - ansible_facts.distribution == 'RedHat'
           - ansible_facts.distribution_major_version == '10'
         fail_msg: The baseline requires a RHEL 10 guest.
+    - name: Validate the optional presenter public key
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'PRESENTER_PUBLIC_KEY') is match('^ssh-ed25519 [A-Za-z0-9+/=]+( .*)?$')
+          - lookup('env', 'PRESENTER_PUBLIC_KEY').splitlines() | length == 1
+        fail_msg: presenterPublicKey must be a single-line ssh-ed25519 public key.
+      when: lookup('env', 'PRESENTER_PUBLIC_KEY') | length > 0
+    - name: Add the optional presenter public key alongside the automation key
+      ansible.builtin.lineinfile:
+        path: /home/demo-automation/.ssh/authorized_keys
+        line: "{{ lookup('env', 'PRESENTER_PUBLIC_KEY') }}"
+        state: present
+        owner: demo-automation
+        group: demo-automation
+        mode: '0600'
+      when: lookup('env', 'PRESENTER_PUBLIC_KEY') | length > 0
+    - name: Validate optional RHSM registration inputs
+      ansible.builtin.assert:
+        that:
+          - (lookup('env', 'RHSM_ORG') | length > 0) == (lookup('env', 'RHSM_ACTIVATION_KEY') | length > 0)
+        fail_msg: Provide both RHSM_ORG and RHSM_ACTIVATION_KEY, or neither when using a configured mirror.
+      no_log: true
+    - name: Check whether guest is registered
+      ansible.builtin.command: subscription-manager identity
+      register: rhsm_identity
+      changed_when: false
+      failed_when: false
+      when: lookup('env', 'RHSM_ORG') | length > 0
+    - name: Register an unregistered guest when RHSM credentials are supplied
+      ansible.builtin.command:
+        argv:
+          - subscription-manager
+          - register
+          - --org
+          - "{{ lookup('env', 'RHSM_ORG') }}"
+          - --activationkey
+          - "{{ lookup('env', 'RHSM_ACTIVATION_KEY') }}"
+      when:
+        - lookup('env', 'RHSM_ORG') | length > 0
+        - rhsm_identity.rc != 0
+      no_log: true
     - name: Install common tools
       ansible.builtin.package:
         name: [tar, curl, xfsprogs]
@@ -38,6 +79,7 @@
 
 - name: Configure the Go API
   hosts: api
+  tags: [api]
   tasks:
     - ansible.builtin.import_tasks: api.yml
 

@@ -1,0 +1,49 @@
+# Demo-only, namespace-internal application artifacts. Do not store secrets here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orders-artifacts
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-artifacts
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: orders-artifacts}
+  template:
+    metadata:
+      labels: {app: orders-artifacts}
+    spec:
+      containers:
+        - name: server
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command: [python3, -m, http.server, '8080', --directory, /artifacts]
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+          volumeMounts:
+            - name: artifacts
+              mountPath: /artifacts
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: orders-artifacts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-artifacts
+spec:
+  selector: {app: orders-artifacts}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

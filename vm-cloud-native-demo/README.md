@@ -2,7 +2,7 @@
 
 A developer-day presentation and demo about modernizing an application in stages on OpenShift. The **target application** has a Node.js single-page frontend, a Go API, and MariaDB. It starts with each tier on its own VM. The intended end state runs the frontend and API in containers, with MariaDB on a VM built using image mode for RHEL and bootc.
 
-**Scaffold status:** the target baseline is three **pre-deployed RHEL 10 VMs configured with Ansible**. The existing implementation still provisions CentOS VMs and configures guests with cloud-init; it must be replaced by the RHEL 10 and Ansible workflow planned below. The application (Rocket Ramen) is implemented and verified locally, including a Playwright suite against a real MariaDB; nothing has been validated end to end on a cluster yet. The MariaDB bootc image build, VM import, persistent-data migration, cutover, and bootc updates are not implemented. No existing VM migration is performed.
+**Baseline status:** three **RHEL 10 VMs configured by Ansible through Tekton** have been validated on an OpenShift 4.22 cluster. The [automation package](automation/README.md) provisions the guests and configures their workloads; the older CentOS/cloud-init chart remains a separate prototype. The MariaDB bootc image build, VM import, persistent-data migration, cutover, and bootc updates are not implemented. No existing VM migration is performed.
 
 ## The application journey
 
@@ -17,7 +17,7 @@ The application is **Rocket Ramen**, a zero-gravity noodle bar. A PatternFly 6 S
 
 A thin Node server (`frontend/server.js`) serves the built SPA and proxies `/api/`, including the SSE stream, to the API. It also answers `/api/webinfo` so the UI can say which tier is answering. The masthead always shows three badges — web runtime, API runtime, MariaDB version — which is what makes the cutover visible: they flip from `VM` to `container` while the order history in MariaDB is unchanged.
 
-The same Go sources run on the app VM and in the API image. The same `frontend/dist` bundle is unpacked by the web VM's cloud-init and copied into the web image, so the container cutover changes the runtime, not the application.
+The same Go sources are built for the app VM and the API image. The same `frontend/dist` bundle is deployed to the web VM by Ansible and copied into the web image, so the planned container cutover changes the runtime, not the application.
 
 ## The application
 
@@ -104,14 +104,7 @@ curl -X POST "http://$HOST/api/restock"  # refill stock
 
 The board also has **Restock galley** and **Clear board** buttons, which is the quickest reset between rehearsals. `/api/reset` is a demo-only endpoint: it deletes the order tables, resets the `M-####` counter, and broadcasts `orders.cleared` so every open browser empties without a reload. It never touches `menu_items`.
 
-To change the schema itself, re-run the guest bootstrap (cloud-init only runs once per guest):
-
-```bash
-virsh -c qemu+ssh://... # inside the db VM:
-/usr/local/sbin/init-orders-db
-```
-
-`init-orders-db` is idempotent: it recreates missing tables, applies `db/schema.sql`, and keeps existing orders.
+Schema changes require a reviewed database migration and a backup. The Ansible baseline initializes the schema only when it creates a new database; it deliberately does not re-run the seed script against an existing database. In particular, the current schema script contains legacy-table removal logic and must not be treated as a general-purpose migration.
 
 ## Presentation narrative
 
@@ -236,7 +229,7 @@ The frontend, API, and database may be provisioned in parallel; guest configurat
 - **Repeatability:** make roles idempotent and make repeat setup preserve existing MariaDB data. Seed the example order only if absent; fail on incompatible pre-existing state rather than overwriting data. Avoid concurrent setup runs against the same demo namespace. Provide a separately documented, explicit reset for disposable data.
 - **Presenter handoff:** preparation ends with a read-only readiness report containing the Route, VM and service state, application version, and end-to-end result. Start the demo only after this report passes; keep logs and failed PipelineRuns available for troubleshooting.
 
-**Implementation boundary:** a separate [RHEL 10 Tekton and Ansible automation package](automation/README.md) now implements this workflow as an unvalidated scaffold. It requires integration with the independently developed application artifacts and an end-to-end cluster rehearsal. The original chart's CentOS/cloud-init guest installation and hard-coded lab credentials remain a separate prototype and do not satisfy this plan; do not install both packages into the same namespace.
+**Implementation boundary:** the [RHEL 10 Tekton and Ansible automation package](automation/README.md) has been exercised on OpenShift 4.22 with the Rocket Ramen artifacts. The original chart's CentOS/cloud-init guest installation and hard-coded lab credentials remain a separate prototype and do not satisfy this plan; do not install both packages into the same namespace. Container cutover and the bootc database migration still require integration and rehearsal.
 
 ## Current scaffold: prerequisites
 
@@ -287,7 +280,9 @@ pipeline:
 
 The source copies under `chart/files/` are generated from `frontend/` and `backend/`. Run `scripts/sync-sources.sh` after editing source before rendering the chart; setup and container preparation also run it. Changes to cloud-init are applied on first boot, not automatically inside already-created guests.
 
-## Prepare the application cutover
+## Prototype: application cutover
+
+The following Helm cutover workflow belongs to the older CentOS/cloud-init prototype and has not yet been integrated with the RHEL 10/Ansible release. Do not run it against the Ansible-managed baseline until the Service selectors, release ownership, and rollback path have been adapted and tested.
 
 Build and publish images from the two Containerfiles using an approved build environment and provide the actual pullable image references below. The frontend image expects `frontend/dist`, so run `./scripts/build-frontend.sh` (or `npm run build`) first; that is the same bundle the web VM already serves. Building and publishing is intentionally separate from the Dev Spaces workspace and is not automated yet.
 
@@ -333,7 +328,7 @@ Application-specific failures to look for:
 
 - **`web bundle missing: expected /opt/orders/web`** from `server.js`: the tarball was not written or extracted. Check `chart/files/web.tar.gz` exists at render time (Helm fails with an explicit message when it does not) and that `tar -xzf` succeeded in `runcmd`.
 - **Board says `reconnecting`**: `/api/stream` is blocked. Check the Route timeout annotation, that the proxy passes `Cache-Control: no-store` and `X-Accel-Buffering: no`, and that the Go API was started without a write timeout.
-- **`database unavailable`**: MariaDB is down or the schema was never seeded. Re-run `/usr/local/sbin/init-orders-db` inside the db VM; cloud-init only runs once per guest.
+- **`database unavailable`**: MariaDB is down, its credentials or network path are wrong, or the schema was never seeded. Inspect the Ansible task logs and database state; do not blindly re-run a schema initializer against existing data.
 - **Emoji or search failures**: the schema must be loaded with `--default-character-set=utf8mb4`, and every table uses `utf8mb4`.
 - **`409 sold out` in the demo unexpectedly**: call `POST /api/restock`; the tray intentionally keeps the basket when a transaction rolls back.
 

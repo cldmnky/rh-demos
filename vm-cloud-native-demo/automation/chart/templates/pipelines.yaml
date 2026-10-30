@@ -16,6 +16,8 @@ data:
   FRONTEND_HEALTH_PATH: {{ .Values.artifacts.frontendHealthPath | quote }}
   API_CHECK_PATH: {{ .Values.artifacts.apiCheckPath | quote }}
   DATA_FORMAT_APPROVED: {{ .Values.artifacts.dataFormatApproved | toString | quote }}
+  SCHEMA_RECOVERY_APPROVED: {{ .Values.artifacts.allowEmptySchemaRecovery | toString | quote }}
+  PRESENTER_PUBLIC_KEY: {{ .Values.vm.presenterPublicKey | quote }}
 ---
 apiVersion: tekton.dev/v1
 kind: Task
@@ -42,12 +44,19 @@ kind: Task
 metadata:
   name: orders-configure-vms
 spec:
+  params:
+    - name: mode
+      type: string
+      default: full
   steps:
     - name: configure
       image: {{ required "images.ansible is required" .Values.images.ansible | quote }}
       timeout: 30m
       envFrom:
         - configMapRef: {name: orders-bootstrap-settings}
+        - secretRef:
+            name: {{ .Values.secrets.rhsm }}
+            optional: true
       env:
         - name: DB_PASSWORD
           valueFrom:
@@ -57,11 +66,16 @@ spec:
         - {name: ANSIBLE_HOST_KEY_CHECKING, value: 'true'}
         - {name: ANSIBLE_LOCAL_TEMP, value: /work/ansible-local}
         - {name: HOME, value: /work}
+        - {name: SETUP_MODE, value: "$(params.mode)"}
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         for item in API_URL FRONTEND_URL SCHEMA_URL; do
-          [[ "${!item}" == https://* ]] || { echo "$item must be an HTTPS URL" >&2; exit 1; }
+          [[ "${!item}" == https://* || "${!item}" == "http://orders-artifacts.${POD_NAMESPACE}.svc:8080/"* ]] || { echo "$item must use HTTPS or the namespace-local artifact service" >&2; exit 1; }
         done
         for item in API_SHA256 FRONTEND_SHA256 SCHEMA_SHA256; do
           [[ "${!item}" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "$item must be a SHA-256 digest" >&2; exit 1; }
@@ -69,7 +83,11 @@ spec:
         cp /ssh/id_rsa /work/id_rsa
         cp /ssh/known_hosts /work/known_hosts
         chmod 600 /work/id_rsa /work/known_hosts
-        ansible-playbook -i /automation/inventory.yml /automation/site.yml
+        case "$SETUP_MODE" in
+          full) ansible-playbook -i /automation/inventory.yml /automation/site.yml ;;
+          api-stage) ansible-playbook -i /automation/inventory.yml /automation/site.yml --tags api --skip-tags api-health ;;
+          *) echo 'Unsupported setup mode' >&2; exit 1 ;;
+        esac
       volumeMounts:
         - {name: ansible, mountPath: /automation, readOnly: true}
         - {name: ssh, mountPath: /ssh, readOnly: true}
@@ -117,6 +135,18 @@ spec:
   tasks:
     - name: provision
       taskRef: {name: orders-create-vms}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-stage-api
+spec:
+  tasks:
+    - name: configure-api
+      taskRef: {name: orders-configure-vms}
+      params:
+        - name: mode
+          value: api-stage
 ---
 apiVersion: tekton.dev/v1
 kind: Pipeline

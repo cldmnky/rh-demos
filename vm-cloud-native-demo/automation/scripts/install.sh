@@ -2,6 +2,7 @@
 set -euo pipefail
 AUTOMATION_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${NAMESPACE:?Set NAMESPACE to the dedicated demo namespace}"
+export NAMESPACE
 if [[ $# -lt 2 || $1 != -f ]]; then
   echo 'Usage: install.sh -f PRIVATE_VALUES.yaml [additional Helm options]' >&2
   exit 2
@@ -13,7 +14,9 @@ oc whoami >/dev/null
 helm template orders-vm-automation "$AUTOMATION_DIR/chart" --namespace "$NAMESPACE" "$@" | ruby -ryaml -e '
   docs = YAML.load_stream(STDIN.read).compact
   settings = docs.find { |d| d["kind"] == "ConfigMap" && d.dig("metadata", "name") == "orders-bootstrap-settings" }.fetch("data")
-  %w[API_URL FRONTEND_URL SCHEMA_URL].each { |key| abort "#{key} must be an HTTPS URL" unless settings.fetch(key).start_with?("https://") }
+  namespace = ENV.fetch("NAMESPACE")
+  local_prefix = "http://orders-artifacts.#{namespace}.svc:8080/"
+  %w[API_URL FRONTEND_URL SCHEMA_URL].each { |key| abort "#{key} must use HTTPS or the namespace-local artifact service" unless settings.fetch(key).start_with?("https://", local_prefix) }
   %w[API_SHA256 FRONTEND_SHA256 SCHEMA_SHA256].each { |key| abort "#{key} must be a SHA-256 digest" unless settings.fetch(key).match?(/\A[0-9a-fA-F]{64}\z/) }
 '
 helm upgrade --install orders-vm-automation "$AUTOMATION_DIR/chart" --namespace "$NAMESPACE" --create-namespace "$@"

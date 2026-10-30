@@ -10,5 +10,8 @@ chart/files/
 
 # Local overrides
 *.local.yaml
+private/
+.env
+.env.*
 __pycache__/
 *.py[cod]
