@@ -9,6 +9,6 @@ Prerequisites: authenticated `oc`, Ruby, an available OpenShift GitOps instance 
 ./vm-cloud-native-demo/prereqs/scripts/prereqs.sh --apply
 ```
 
-The script captures the current kubeconfig context, checks for conflicting Pipelines Subscriptions, applies an Argo CD Application and waits for Argo synchronization, a successful operator CSV and the Tekton Pipeline CRD. Inspect the TektonConfig and controller pods separately to confirm operands are ready. It does not adopt a differently named Pipelines Subscription.
+The script captures the current kubeconfig context, checks for conflicting Pipelines Subscriptions, applies an Argo CD Application and waits for Argo synchronization, a successful operator CSV, the Tekton Pipeline CRD, and the default TektonConfig to report Ready. It does not adopt a differently named Pipelines Subscription.
 
 By default the Application points at `https://github.com/cldmnky/rh-demos.git`, branch `vm-cloud-native-prereqs`, and `vm-cloud-native-demo/prereqs/pipelines`. Override `PREREQ_GIT_URL`, `PREREQ_GIT_REF`, or `PREREQ_GIT_PATH` when using a different published source. The referenced files must exist in that Git revision; uncommitted local files cannot be read by Argo CD. After merging the manifests into the main branch, set `PREREQ_GIT_REF=main` and reapply the Application if desired. See the [Red Hat installation guide](https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.22/html/installing_and_configuring/installing-pipelines) for the operator's subscription model.

@@ -21,6 +21,9 @@ if [[ "$mode" == --check ]]; then
   ocx get application "$ARGO_APPLICATION" -n "$ARGO_NAMESPACE" --ignore-not-found
   ocx get subscription openshift-pipelines-operator -n openshift-operators --ignore-not-found
   ocx get crd pipelines.tekton.dev --ignore-not-found
+  if ocx get crd tektonconfigs.operator.tekton.dev >/dev/null 2>&1; then
+    ocx get tektonconfig config --ignore-not-found
+  fi
   exit 0
 fi
 # Do not adopt an existing subscription installed under another name.
@@ -43,9 +46,10 @@ for ((attempt=0; attempt<90; attempt++)); do
   if [[ -n "$installed" ]]; then
     csvphase=$(ocx get csv "$installed" -n openshift-operators -o jsonpath='{.status.phase}' --ignore-not-found)
     if [[ "$csvphase" == Succeeded ]] && ocx get crd pipelines.tekton.dev >/dev/null 2>&1; then
+      tektonready=$(ocx get tektonconfig config -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' --ignore-not-found)
       sync=$(printf '%s' "$app" | ruby -rjson -e 'print JSON.parse(STDIN.read).dig("status","sync","status")')
-      if [[ "$sync" == Synced ]]; then
-        printf 'Argo CD synchronized; operator %s is Succeeded; Tekton Pipeline CRD exists.\n' "$installed"
+      if [[ "$sync" == Synced && "$tektonready" == True ]]; then
+        printf 'Argo CD synchronized; operator %s is Succeeded; TektonConfig is Ready.\n' "$installed"
         exit 0
       fi
     fi
