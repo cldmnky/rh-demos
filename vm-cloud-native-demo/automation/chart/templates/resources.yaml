@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders-vm-bootstrap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orders-vm-bootstrap
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines]
+    verbs: [get, list, watch, create, patch, update]
+  - apiGroups: [route.openshift.io]
+    resources: [routes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orders-vm-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: orders-vm-bootstrap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: orders-vm-bootstrap
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orders-bootstrap-cloudinit
+type: Opaque
+stringData:
+  userdata: |
+    #cloud-config
+    users:
+      - name: demo-automation
+        groups: [wheel]
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - {{ required "vm.sshPublicKey is required" .Values.vm.sshPublicKey | quote }}
+    ssh_pwauth: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orders-db-data
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: {{ .Values.vm.dataSize }}
+  {{- with .Values.vm.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- range $tier := list "web" "app" "db" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-{{ $tier }}
+spec:
+  selector:
+    kubevirt.io/domain: orders-{{ $tier }}
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: 22
+    - name: {{ if eq $tier "db" }}mysql{{ else }}http{{ end }}
+      port: {{ if eq $tier "db" }}3306{{ else }}8080{{ end }}
+      targetPort: {{ if eq $tier "db" }}3306{{ else }}8080{{ end }}
+{{- end }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: orders
+spec:
+  to: {kind: Service, name: orders-web}
+  port: {targetPort: http}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-ansible
+  labels: {app.kubernetes.io/part-of: orders-vm-automation}
+data:
+{{ (.Files.Glob "files/ansible/*").AsConfig | indent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-vm-definitions
+data:
+{{- range $tier := list "web" "app" "db" }}
+  {{ $tier }}.yaml: |
+    apiVersion: kubevirt.io/v1
+    kind: VirtualMachine
+    metadata:
+      name: orders-{{ $tier }}
+    spec:
+      runStrategy: Always
+      dataVolumeTemplates:
+        - metadata: {name: orders-{{ $tier }}-root}
+          spec:
+            sourceRef:
+              kind: DataSource
+              name: {{ $.Values.vm.sourceName }}
+              namespace: {{ $.Values.vm.sourceNamespace }}
+            storage:
+              resources:
+                requests: {storage: {{ $.Values.vm.rootSize }}}
+              {{- with $.Values.vm.storageClass }}
+              storageClassName: {{ . | quote }}
+              {{- end }}
+      template:
+        metadata:
+          labels: {app: orders-{{ $tier }}}
+        spec:
+          domain:
+            cpu: {cores: {{ $.Values.vm.cpu }}}
+            memory: {guest: {{ $.Values.vm.memory }}}
+            devices:
+              disks:
+                - name: rootdisk
+                  disk: {bus: virtio}
+                - name: cloudinit
+                  disk: {bus: virtio}
+                {{- if eq $tier "db" }}
+                - name: datadisk
+                  serial: orders-data
+                  disk: {bus: virtio}
+                {{- end }}
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: rootdisk
+              dataVolume: {name: orders-{{ $tier }}-root}
+            - name: cloudinit
+              cloudInitNoCloud:
+                secretRef: {name: orders-bootstrap-cloudinit}
+            {{- if eq $tier "db" }}
+            - name: datadisk
+              persistentVolumeClaim: {claimName: orders-db-data}
+            {{- end }}
+{{- end }}

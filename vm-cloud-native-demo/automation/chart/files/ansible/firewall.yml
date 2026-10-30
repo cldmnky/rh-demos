@@ -1,0 +1,15 @@
+---
+- name: Check firewalld status
+  ansible.builtin.command: systemctl is-active firewalld
+  register: firewalld_status
+  changed_when: false
+  failed_when: false
+- name: Open application port in active firewalld
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ '3306' if inventory_hostname == 'orders-db' else '8080' }}/tcp"
+  register: firewall_change
+  changed_when: "'ALREADY_ENABLED' not in firewall_change.stderr"
+  when: firewalld_status.rc == 0
+- name: Reload firewall after change
+  ansible.builtin.command: firewall-cmd --reload
+  when: firewalld_status.rc == 0 and firewall_change.changed
+  changed_when: true

@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-bootstrap-settings
+data:
+  API_URL: {{ .Values.artifacts.apiUrl | quote }}
+  API_SHA256: {{ .Values.artifacts.apiSha256 | quote }}
+  FRONTEND_URL: {{ .Values.artifacts.frontendUrl | quote }}
+  FRONTEND_SHA256: {{ .Values.artifacts.frontendSha256 | quote }}
+  SCHEMA_URL: {{ .Values.artifacts.schemaUrl | quote }}
+  SCHEMA_SHA256: {{ .Values.artifacts.schemaSha256 | quote }}
+  FRONTEND_ENTRY: {{ .Values.artifacts.frontendEntry | quote }}
+  NODE_PACKAGE: {{ .Values.artifacts.nodePackage | quote }}
+  MARIADB_PACKAGE: {{ .Values.artifacts.mariadbPackage | quote }}
+  API_HEALTH_PATH: {{ .Values.artifacts.apiHealthPath | quote }}
+  FRONTEND_HEALTH_PATH: {{ .Values.artifacts.frontendHealthPath | quote }}
+  API_CHECK_PATH: {{ .Values.artifacts.apiCheckPath | quote }}
+  DATA_FORMAT_APPROVED: {{ .Values.artifacts.dataFormatApproved | toString | quote }}
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: orders-create-vms
+spec:
+  steps:
+    - name: provision
+      image: {{ .Values.images.oc | quote }}
+      timeout: 20m
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        for tier in db app web; do oc apply -f "/definitions/${tier}.yaml"; done
+        for tier in db app web; do oc wait --for=condition=Ready "vm/orders-${tier}" --timeout=15m; done
+      volumeMounts:
+        - {name: definitions, mountPath: /definitions, readOnly: true}
+  volumes:
+    - name: definitions
+      configMap: {name: orders-vm-definitions}
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: orders-configure-vms
+spec:
+  steps:
+    - name: configure
+      image: {{ required "images.ansible is required" .Values.images.ansible | quote }}
+      timeout: 30m
+      envFrom:
+        - configMapRef: {name: orders-bootstrap-settings}
+      env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.database }}
+              key: password
+        - {name: ANSIBLE_HOST_KEY_CHECKING, value: 'true'}
+        - {name: ANSIBLE_LOCAL_TEMP, value: /work/ansible-local}
+        - {name: HOME, value: /work}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        for item in API_URL FRONTEND_URL SCHEMA_URL; do
+          [[ "${!item}" == https://* ]] || { echo "$item must be an HTTPS URL" >&2; exit 1; }
+        done
+        for item in API_SHA256 FRONTEND_SHA256 SCHEMA_SHA256; do
+          [[ "${!item}" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "$item must be a SHA-256 digest" >&2; exit 1; }
+        done
+        cp /ssh/id_rsa /work/id_rsa
+        cp /ssh/known_hosts /work/known_hosts
+        chmod 600 /work/id_rsa /work/known_hosts
+        ansible-playbook -i /automation/inventory.yml /automation/site.yml
+      volumeMounts:
+        - {name: ansible, mountPath: /automation, readOnly: true}
+        - {name: ssh, mountPath: /ssh, readOnly: true}
+        - {name: work, mountPath: /work}
+  volumes:
+    - name: ansible
+      configMap: {name: orders-ansible}
+    - name: ssh
+      secret:
+        secretName: {{ .Values.secrets.ssh }}
+    - name: work
+      emptyDir: {}
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: orders-verify-route
+spec:
+  steps:
+    - name: verify
+      image: {{ .Values.images.oc | quote }}
+      timeout: 3m
+      envFrom:
+        - configMapRef: {name: orders-bootstrap-settings}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        host=$(oc get route orders -o jsonpath='{.spec.host}')
+        [[ -n "$host" && "$API_CHECK_PATH" == /* ]] || { echo 'Missing route host or API path' >&2; exit 1; }
+        for attempt in {1..24}; do
+          if curl --fail --silent --show-error --max-time 5 "http://${host}${API_CHECK_PATH}"; then
+            printf '\nApplication reachable at http://%s/\n' "$host"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo 'Application route failed verification' >&2
+        exit 1
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-provision
+spec:
+  tasks:
+    - name: provision
+      taskRef: {name: orders-create-vms}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-configure
+spec:
+  tasks:
+    - name: configure
+      taskRef: {name: orders-configure-vms}
+    - name: verify
+      runAfter: [configure]
+      taskRef: {name: orders-verify-route}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: orders-bootstrap
+spec:
+  tasks:
+    - name: provision
+      taskRef: {name: orders-create-vms}
+    - name: configure
+      runAfter: [provision]
+      taskRef: {name: orders-configure-vms}
+    - name: verify
+      runAfter: [configure]
+      taskRef: {name: orders-verify-route}

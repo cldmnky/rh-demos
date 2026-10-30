@@ -1,0 +1,29 @@
+vm:
+  sourceNamespace: openshift-virtualization-os-images
+  sourceName: rhel10
+  storageClass: ""
+  rootSize: 20Gi
+  dataSize: 20Gi
+  memory: 2Gi
+  cpu: 2
+  sshPublicKey: ""
+images:
+  oc: quay.io/openshift/origin-cli:4.22
+  ansible: ""
+secrets:
+  ssh: orders-automation-ssh
+  database: orders-database-credentials
+artifacts:
+  apiUrl: ""
+  apiSha256: ""
+  frontendUrl: ""
+  frontendSha256: ""
+  schemaUrl: ""
+  schemaSha256: ""
+  frontendEntry: server.js
+  nodePackage: nodejs
+  mariadbPackage: mariadb-server
+  apiHealthPath: /health
+  frontendHealthPath: /
+  apiCheckPath: /api/menu
+  dataFormatApproved: false

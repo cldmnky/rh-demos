@@ -1,0 +1,50 @@
+---
+- name: Download pinned Go API executable
+  ansible.builtin.get_url:
+    url: "{{ lookup('env', 'API_URL') }}"
+    dest: /opt/orders/orders-api
+    checksum: "sha256:{{ lookup('env', 'API_SHA256') }}"
+    mode: '0755'
+  register: api_binary
+- name: Configure API environment
+  ansible.builtin.copy:
+    dest: /etc/orders-api.env
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      DB_DSN=orders:{{ lookup('env', 'DB_PASSWORD') }}@tcp(orders-db:3306)/orders?parseTime=true&timeout=3s
+      APP_RUNTIME=VM
+      PORT=8080
+  no_log: true
+  register: api_environment
+- name: Configure API systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/orders-api.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Orders Go API
+      After=network-online.target
+      Wants=network-online.target
+      [Service]
+      EnvironmentFile=/etc/orders-api.env
+      ExecStart=/opt/orders/orders-api
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+  register: api_unit
+- name: Enable and start API
+  ansible.builtin.systemd:
+    name: orders-api
+    daemon_reload: true
+    enabled: true
+    state: "{{ 'restarted' if api_binary.changed or api_environment.changed or api_unit.changed else 'started' }}"
+- name: Wait for API and its MariaDB connection
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8080{{ lookup('env', 'API_HEALTH_PATH') }}"
+    status_code: 200
+  register: api_health
+  until: api_health.status | default(0) == 200
+  retries: 24
+  delay: 5
