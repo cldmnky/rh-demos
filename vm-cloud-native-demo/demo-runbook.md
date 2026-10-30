@@ -29,8 +29,9 @@ Before the audience arrives:
 1. From this directory, run `./scripts/setup.sh` and check the printed application URL. Keep the generated private setup directory. See [README.md](README.md) for prerequisites, including the RHEL subscription setting.
 2. The setup script runs `./modernization/prepare.sh` to install the namespace-scoped RolloutManager, image streams and build configurations, build both application images, and stage the container workloads. It also sets the GitOps Operator Subscription to namespace-scoped Rollouts mode, a cluster-wide operator setting; it refuses the change if a cluster-scoped RolloutManager exists. This does not change the application Route or the API Service. It allows a slow initial image pull/build to happen before the presentation. Use `NAMESPACE=...` if different from `rocket-ramen`.
 3. Confirm `oc get vm,deploy,rollout,build -n rocket-ramen`. The three VMs and the container API must be ready; the frontend Rollout must have ready replicas. `oc get rolloutmanager -n rocket-ramen` shows the Rollouts controller resource. If it is not ready, inspect `oc get pods -n rocket-ramen` and the operator before presenting.
-4. Open the application and create a Dev Spaces workspace from the raw URL of `vm-cloud-native-demo/devfile.yaml` on the published branch. The devfile clones the monorepo into `/projects/rh-demos`; publish the current changes or select a branch that contains them before creating the workspace. The Node and OpenShift CLI components share the workspace source. Authenticate the CLI terminal to the demo cluster as a user with build and namespace edit permissions; do not display access tokens on screen. The Node terminal builds the frontend bundle; the OpenShift CLI terminal submits builds to the cluster. A normal Dev Spaces workspace is not a privileged image builder.
-5. Keep the terminal in this directory, logged in to the correct cluster. The presenter script is `./demo/demo.sh`; it **changes live demo traffic** in act 3. The terminal commands below are alternatives for rehearsing individual steps. Do not run the presentation script as an unattended test.
+4. Open the application and create a Dev Spaces workspace using the [raw devfile on main](https://raw.githubusercontent.com/cldmnky/rh-demos/main/vm-cloud-native-demo/devfile.yaml), or the corresponding raw URL for your presentation branch. The devfile clones that repository's default branch into `/projects/rh-demos`. Publish the presentation changes to that branch before creating the workspace; for another branch, configure the project checkout accordingly. Open `vm-cloud-native-demo` in the editor and select the `node` and `openshift-cli` terminal components. They share the project files.
+5. In the `openshift-cli` terminal, authenticate `oc` to the demo cluster as a user who can start builds and apply Deployments and Rollouts in the demo namespace. Confirm with `oc whoami` and set `NAMESPACE` if it differs from `rocket-ramen`. Do not show login tokens. The Node component builds the frontend bundle; OpenShift builds the images in the cluster. A normal Dev Spaces workspace is not a privileged image builder.
+6. Keep a **local presenter terminal** in this directory, logged in to the correct cluster and using the original private setup directory and SSH key. The bootc migration and reset use those local files and `virtctl`; they are not run from the workspace. The presenter script is `./demo/demo.sh`; it **changes live demo traffic** in act 3. The terminal commands below are alternatives for rehearsing individual steps. Do not run the presentation script as an unattended test.
 
 ## 1. The application we inherited
 
@@ -46,31 +47,31 @@ In Dev Spaces, open `automation/chart/files/ansible/site.yml` and `api.yml`: Tek
 
 **Say:** “We have changed the platform and the operating model. The application itself still looks familiar.”
 
-## 2. Build and deploy application containers
+## 2. Build and apply from Dev Spaces
 
-In Dev Spaces, show `frontend/Containerfile`, `backend/Containerfile` and `devfile.yaml`. The application code is the same; the frontend image includes the built SPA, while the API image contains the Go binary.
+**Switch to the Dev Spaces editor.** Show `frontend/Containerfile`, `backend/Containerfile`, `devfile.yaml` and `modernization/workloads.yaml`. The application code is the same; the frontend image includes the built SPA, and the API image contains the Go binary.
 
-In the **Node** terminal:
+Run the **`build-frontend` devfile command** in Dev Spaces. It uses the `node` component to build the SPA into the shared project directory. Wait for it to finish before building the web image. The first run may install npm dependencies.
+
+In the **`openshift-cli` terminal** in Dev Spaces, use the authenticated session prepared above:
 
 ```bash
 cd "$PROJECTS_ROOT/rh-demos/vm-cloud-native-demo"
-./scripts/build-frontend.sh
+export NAMESPACE=rocket-ramen
+./demo/devspaces.sh
 ```
 
-In the **OpenShift CLI** terminal, from the same project directory, authenticate `oc`, then:
+The demo-magic segment builds the API and frontend images from the workspace with OpenShift BuildConfigs, displays the workload manifest, resolves the new image digests and visibly runs `oc apply` for the Deployment and frontend Rollout. It then invokes `modernization/deploy.sh` to repeat the idempotent apply and wait for readiness. The API reads the existing database Secret; both containers initially use the existing VM-backed Services. No Route or Service traffic is switched by this apply.
 
-```bash
-./modernization/build.sh api
-./modernization/build.sh web
-./modernization/deploy.sh
-oc get builds,deploy,rollout -n "$NAMESPACE"
-```
+Builds may take several minutes. Setup has already staged working images and workloads, so if a live build is slow, show the prepared resources and return to the local terminal. The exact workspace code and the presenter segment must be published on the branch cloned by Dev Spaces.
 
-Set `NAMESPACE` in each terminal if it differs from the default. The scripts upload source/build context to OpenShift BuildConfigs and push images to the internal registry. Deployment resolves the built ImageStream tags to immutable image digests, so rebuilding produces a new revision. The frontend context contains the bundle, not `node_modules`. The API Deployment reads the existing database password from a Kubernetes Secret and still connects to the VM database. The frontend Rollout initially connects to the original API Service. Builds can take several minutes: start them live and discuss the manifest, or show the prepared builds if time is short. `deploy.sh` creates workloads but does not change user traffic.
+**Say:** “From the development workspace, we build images and apply workloads next to the existing VM application.”
 
-**Say:** “We can build from the same workspace and run the new workloads beside the old ones.”
+**Return to the local presenter terminal** and continue `./demo/demo.sh` with act 3.
 
 ## 3. Shift traffic with a way back
+
+**Local presenter terminal:** continue the demo-magic script. The commands below describe what it executes.
 
 The API Service has one active backend selection at a time. The frontend Route can split incoming connections between the VM Service and container Service. This is the VM-to-container canary; it is independent of Argo Rollouts.
 
@@ -110,7 +111,7 @@ Before the demo, prepare and validate the target as described in [bootc/README.m
 export SNAPSHOT_CLASS=ocs-external-storagecluster-rbdplugin-snapclass
 ```
 
-Show `bootc/Containerfile`. The image contains the OS and MariaDB; the database files are on a separate disk. Run:
+**Local presenter terminal:** continue the demo-magic script and show `bootc/Containerfile`. The image contains the OS and MariaDB; the database files are on a separate disk. The script runs:
 
 ```bash
 ./bootc/migrate.sh
@@ -126,7 +127,7 @@ The [image-mode documentation](https://docs.redhat.com/en/documentation/red_hat_
 
 ## 5. Final state and reset
 
-Show `oc get vm,pods,svc`, the browser's container/container/MariaDB stack and the orders. The legacy VM objects and VM-owned root disks have been removed. The separate database data PVC and snapshots are retained. After the presentation:
+Show `oc get vm,pods,svc`, the browser's container/container/MariaDB stack and the orders. The legacy VM objects and VM-owned root disks have been removed. The separate database data PVC and snapshots are retained. After the presentation, in the local presenter terminal:
 
 ```bash
 ./bootc/reset.sh
