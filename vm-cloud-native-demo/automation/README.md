@@ -15,7 +15,7 @@ A VM reporting Ready does not mean its guest or application is ready. Every pipe
 ## Prerequisites and interfaces
 
 - OpenShift 4.21/4.22 with OpenShift Virtualization and OpenShift Pipelines, a dedicated namespace, working default pod networking and ingress, and permission to create the chart's resources. The CLI image must contain `oc`, `bash`, and `curl`.
-- A ready, authorized RHEL 10 DataSource supporting cloning, RHEL 10 guest images with cloud-init, Python 3 and SSH, and appropriate storage. Configure DataSource access and any required clone authorization. Choose a supported storage class and verify that VM disks and the separate RWO data disk work with it.
+- A ready, authorized RHEL 10 DataSource supporting cloning from either a VolumeSnapshot or PVC, RHEL 10 guest images with cloud-init, Python 3 and SSH, and appropriate storage. The top-level setup sizes new VM root disks from the snapshot restore size or PVC request; the chart uses a CDI DataSource reference for either form. Configure DataSource access and any required clone authorization. Choose a supported storage class and verify that VM disks and the separate RWO data disk work with it.
 - RHEL entitlement and repositories or a suitable internal mirror accessible from each VM before Ansible installs packages. Optionally, provide an `orders-rhsm` Secret containing both `RHSM_ORG` and `RHSM_ACTIVATION_KEY`; Ansible registers guests that are not already registered. Alternatively, configure a trusted mirror in the guest image. Confirm the configured Node.js and MariaDB package names exist in the chosen repositories.
 - A pullable Ansible task image with `ansible-playbook`, Python 3, Bash, and OpenSSH. `images/ansible.Containerfile` is an example build recipe, not a verified or supported image; build, pin, and validate an image appropriate for the cluster. The task runs under the cluster's normal security context.
 - Artifact URLs reachable by the VMs, with SHA-256 digests for each **specific artifact**: a Linux executable for the Go API matching VM architecture, a tar.gz frontend archive containing the Node.js server and assets at its root, and a MariaDB initialization SQL file. HTTPS URLs and the namespace-local `orders-artifacts` HTTP Service are accepted. The frontend entrypoint defaults to `server.js`. The API must support `DB_DSN`, `APP_RUNTIME`, `PORT`, `/health`, and a JSON menu endpoint (default `/api/menu` with a nonempty `items` array); the frontend must serve `/` and proxy `/api/` to `API_URL`.
@@ -107,5 +107,7 @@ Offline validation requires Helm, Ruby, Bash, and `ansible-playbook`:
 ```bash
 ./scripts/check.sh
 ```
+
+From the demo directory, `python3 scripts/test_setup_prereqs.py` checks snapshot/PVC source sizing and cluster-specific private-state paths without contacting a cluster.
 
 This checks Helm rendering, embedded VM YAML, Ansible syntax, and shell syntax only. It cannot validate cluster CRDs, SSH trust, guest boot, artifacts, package repositories, storage, SELinux, networking, database initialization, or application behavior.

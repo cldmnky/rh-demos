@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rocket-ramen-agent-ca
+  namespace: {{ .Values.workspaceNamespace | quote }}
+  labels:
+    controller.devfile.io/mount-to-devworkspace: "true"
+    controller.devfile.io/watch-configmap: "true"
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+    controller.devfile.io/mount-as: file
+    controller.devfile.io/mount-path: /etc/rocket-ramen-agent-ca
+    controller.devfile.io/mount-to-devworkspace-include: {{ .Values.workspaceName | quote }}
+    controller.devfile.io/mount-on-start: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rocket-ramen-agent
+  namespace: {{ .Values.workspaceNamespace | quote }}
+  labels:
+    controller.devfile.io/mount-to-devworkspace: "true"
+    controller.devfile.io/watch-configmap: "true"
+  annotations:
+    controller.devfile.io/mount-as: file
+    controller.devfile.io/mount-path: /etc/rocket-ramen-agent
+    controller.devfile.io/mount-to-devworkspace-include: {{ .Values.workspaceName | quote }}
+    controller.devfile.io/mount-on-start: "true"
+data:
+  opencode.json: |
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "model": "demo/demo-model",
+      "share": "disabled",
+      "autoupdate": false,
+      "provider": {
+        "demo": {
+          "npm": "@ai-sdk/openai-compatible",
+          "name": "Existing Lightspeed Azure deployment",
+          "options": {
+            "baseURL": "https://rocket-ramen-agent-llm.{{ .Release.Namespace }}.svc:8443/v1",
+            "apiKey": "{file:/etc/rocket-ramen-agent-key/apikey}"
+          },
+          "models": {
+            "demo-model": {
+              "name": "Lightspeed deployment {{ .Values.provider.deployment }}",
+              "limit": {"context": 128000, "output": 4096}
+            }
+          }
+        }
+      },
+      "mcp": {
+        "openshift": {
+          "type": "remote",
+          "url": "https://openshift-mcp-server.{{ .Release.Namespace }}.svc:8443/mcp",
+          "oauth": false,
+          "headers": {"Authorization": "Bearer {file:/var/run/secrets/kubernetes.io/serviceaccount/token}"}
+        }
+      },
+      "permission": {"*": "ask", "read": "allow", "glob": "allow", "grep": "allow"}
+    }
+  agent.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v node >/dev/null && command -v npm >/dev/null || {
+      echo 'Run this launcher in the node container terminal.' >&2; exit 1;
+    }
+    export NODE_EXTRA_CA_CERTS=/etc/rocket-ramen-agent-ca/service-ca.crt
+    export OPENCODE_CONFIG=/etc/rocket-ramen-agent/opencode.json
+    export OPENCODE_DISABLE_SHARE=true
+    export NAMESPACE=${NAMESPACE:-{{ .Values.demoNamespace | quote }}}
+    # The UBI Node image's npm prefix points into its image-default home.
+    export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+    mkdir -p "$NPM_CONFIG_PREFIX/lib/node_modules"
+    if [[ ${1:-} == --check ]]; then
+      exec node /etc/rocket-ramen-agent/check.mjs
+    fi
+    exec npx --yes opencode-ai@{{ .Values.agentVersion }} "$@"
+  check.mjs: |
+{{ .Files.Get "files/check.mjs" | indent 4 }}

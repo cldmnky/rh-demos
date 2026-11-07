@@ -20,13 +20,15 @@ From this directory, run:
 
 The script applies the prerequisite Argo CD applications, prepares a RHEL 10 boot source if needed, builds and stages the application, creates private credentials, runs Tekton and Ansible, stages the container workloads, and prepares the bootc builder and target VM. It waits for the three VMs and checks the application; the final line prints its URL. Allow time for operator installation, image import, VM boot, and package installation.
 
-The default namespace is `rocket-ramen`. Private setup files are kept outside the repository in `${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo`; **keep this directory** for repeat runs. Existing VM disks, database contents, and credentials are retained. The script uses `~/.ssh/rh-demos` for automation if it exists, otherwise it generates a separate key in the private directory. To authorize a presenter SSH public key as well, or reuse an earlier private directory:
+The default namespace is `rocket-ramen`. Private setup files are kept outside the repository in `${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo/<cluster-uid>/<namespace>`; **keep this directory** for repeat runs. The cluster UID comes from the `kube-system` namespace, so a replacement cluster gets fresh state even when its context name is reused. Setup and the bootc migration/reset commands resolve the same directory. Existing VM disks, database contents, and credentials are retained. The script uses `~/.ssh/rh-demos` for automation if it exists, otherwise it generates a separate key in the private directory. To authorize a presenter SSH public key as well, or reuse an earlier private directory:
 
 ```bash
 PRESENTER_PUBLIC_KEY_FILE=~/.ssh/presenter.pub PRIVATE_DIR=/path/to/existing/private-dir ./scripts/setup.sh
 ```
 
-`NAMESPACE`, `SSH_KEY`, `PRIVATE_DIR`, `ANSIBLE_IMAGE`, and `VM_ARCH` can be overridden as environment variables. `RHEL_SOURCE_NAMESPACE` and `RHEL_SOURCE_NAME` select an existing ready RHEL 10 DataSource on the first run. The default pinned Ansible execution image requires registry access. Never commit private files, subscription details, or credentials.
+For an existing installation that used the old flat state directory, export `PRIVATE_DIR` pointing to that original directory before setup, migration or reset. Do not reuse it for a fresh cluster: it may reference database disks from the earlier cluster.
+
+`NAMESPACE`, `SSH_KEY`, `PRIVATE_DIR`, `ANSIBLE_IMAGE`, and `VM_ARCH` can be overridden as environment variables. `RHEL_SOURCE_NAMESPACE` and `RHEL_SOURCE_NAME` select an existing ready RHEL 10 DataSource on the first run. Setup uses the default `openshift-virtualization-os-images/rhel10` DataSource when ready, including its snapshot-backed form. New VM root disks use the snapshot's restore size or the source PVC's requested size; CDI clones directly through the DataSource. The default pinned Ansible execution image requires registry access. Never commit private files, subscription details, or credentials.
 
 For the presenter, `./demo/demo.sh` uses demo-magic; the Dev Spaces workspace described in `devfile.yaml` is rendered into `prereqs/devspace/` and started by Argo CD (`prereqs/README.md`). The demo script creates an order; setup verification is read-only. See [automation/README.md](automation/README.md) for pipeline details and troubleshooting.
 

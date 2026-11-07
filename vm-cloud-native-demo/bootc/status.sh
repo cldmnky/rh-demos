@@ -2,7 +2,7 @@
 # Show image mode inside the running target VM without disabling SSH host checking.
 set -euo pipefail
 NAMESPACE=${NAMESPACE:-rocket-ramen}
-PRIVATE_DIR=${PRIVATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo"}
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/private-dir.sh"
 SSH_KEY=${SSH_KEY:-"$HOME/.ssh/rh-demos"}
 [[ -f "$SSH_KEY" ]] || SSH_KEY="$PRIVATE_DIR/automation-key"
 [[ -f "$SSH_KEY" && -f "$PRIVATE_DIR/db-bootc-known_hosts" ]] || { echo 'Missing target SSH identity.' >&2; exit 1; }

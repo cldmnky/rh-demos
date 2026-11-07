@@ -23,6 +23,10 @@ spec:
       container:
         image: registry.access.redhat.com/ubi9/go-toolset:latest
         env:
+        - name: HOME
+          value: "/projects/.home"
+        - name: SHELL
+          value: "/bin/bash"
         - name: GOPATH
           value: "/tmp/go"
         - name: GOCACHE
@@ -30,18 +34,25 @@ spec:
         - name: CODE_HOST
           value: 0.0.0.0
         command:
-        - tail
-        - "-f"
-        - "/dev/null"
+        - "/bin/bash"
+        - "-c"
+        - mkdir -p "$HOME"; exec tail -f /dev/null
         memoryLimit: 2Gi
         mountSources: true
     - name: node
       container:
         image: registry.access.redhat.com/ubi9/nodejs-20:latest
+        env:
+        - name: HOME
+          value: "/projects/.home"
+        - name: SHELL
+          value: "/bin/bash"
+        - name: API_URL
+          value: http://orders-api.rocket-ramen.svc.cluster.local:8080
         command:
-        - tail
-        - "-f"
-        - "/dev/null"
+        - "/bin/bash"
+        - "-c"
+        - mkdir -p "$HOME"; exec tail -f /dev/null
         memoryLimit: 2Gi
         mountSources: true
         endpoints:
@@ -49,18 +60,20 @@ spec:
           targetPort: 5173
           exposure: public
           protocol: http
-        env:
-        - name: API_URL
-          value: http://orders-api.rocket-ramen.svc.cluster.local:8080
     - name: openshift-cli
       container:
         image: quay.io/openshift/origin-cli:4.22
+        env:
+        - name: HOME
+          value: "/projects/.home"
+        - name: SHELL
+          value: "/bin/bash"
         memoryLimit: 1Gi
         mountSources: true
         command:
-        - tail
-        - "-f"
-        - "/dev/null"
+        - "/bin/bash"
+        - "-c"
+        - mkdir -p "$HOME"; exec tail -f /dev/null
     - container:
         command:
         - "/entrypoint-init-container.sh"

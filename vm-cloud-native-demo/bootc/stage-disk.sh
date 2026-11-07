@@ -2,7 +2,7 @@
 # Serve the completed builder artifact only inside the demo namespace.
 set -euo pipefail
 NAMESPACE=${NAMESPACE:-rocket-ramen}
-PRIVATE_DIR=${PRIVATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo"}
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/private-dir.sh"
 SSH_KEY=${SSH_KEY:-"$HOME/.ssh/rh-demos"}
 [[ -f "$SSH_KEY" ]] || SSH_KEY="$PRIVATE_DIR/automation-key"
 : "${BUILDER_DISK_DIR:?Set BUILDER_DISK_DIR to the builder directory containing disk.qcow2}"

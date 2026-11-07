@@ -11,6 +11,13 @@ components:
     container:
       image: registry.access.redhat.com/ubi9/go-toolset:latest
       env:
+        # Tool images may have an unwritable HOME and a nologin passwd shell
+        # under OpenShift's arbitrary UID. Keep editor caches and CLI config
+        # in the writable project volume and select a real terminal shell.
+        - name: HOME
+          value: /projects/.home
+        - name: SHELL
+          value: /bin/bash
         - name: GOPATH
           value: /tmp/go
         - name: GOCACHE
@@ -21,13 +28,18 @@ components:
         # interfaces here. Without it the workspace fails its health check.
         - name: CODE_HOST
           value: 0.0.0.0
-      command: ['tail', '-f', '/dev/null']
+      command: ['/bin/bash', '-c', 'mkdir -p "$HOME"; exec tail -f /dev/null']
       memoryLimit: 2Gi
       mountSources: true
   - name: node
     container:
       image: registry.access.redhat.com/ubi9/nodejs-20:latest
-      command: ['tail', '-f', '/dev/null']
+      env:
+        - name: HOME
+          value: /projects/.home
+        - name: SHELL
+          value: /bin/bash
+      command: ['/bin/bash', '-c', 'mkdir -p "$HOME"; exec tail -f /dev/null']
       memoryLimit: 2Gi
       mountSources: true
       endpoints:
@@ -40,9 +52,14 @@ components:
   - name: openshift-cli
     container:
       image: quay.io/openshift/origin-cli:4.22
+      env:
+        - name: HOME
+          value: /projects/.home
+        - name: SHELL
+          value: /bin/bash
       memoryLimit: 1Gi
       mountSources: true
-      command: ['tail', '-f', '/dev/null']
+      command: ['/bin/bash', '-c', 'mkdir -p "$HOME"; exec tail -f /dev/null']
 commands:
   - id: test-api
     exec:

@@ -4,13 +4,13 @@ set -euo pipefail
 DEMO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 AUTOMATION_DIR="$DEMO_DIR/automation"
 NAMESPACE=${NAMESPACE:-rocket-ramen}
-PRIVATE_DIR=${PRIVATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo"}
-export NAMESPACE PRIVATE_DIR
+export NAMESPACE
 umask 077
 for tool in oc helm ruby go npm tar ssh-keygen curl python3; do
   command -v "$tool" >/dev/null || { echo "Missing required command: $tool" >&2; exit 1; }
 done
 oc whoami >/dev/null
+source "$DEMO_DIR/scripts/private-dir.sh"
 printf 'Preparing demo on context %s, namespace %s\n' "$(oc config current-context)" "$NAMESPACE"
 mkdir -p "$PRIVATE_DIR"
 private_real=$(cd "$PRIVATE_DIR" && pwd -P)
@@ -78,13 +78,9 @@ if ! source_ready "$SOURCE_NAMESPACE" "$SOURCE_NAME"; then
 fi
 export SOURCE_NAMESPACE SOURCE_NAME
 printf 'Using RHEL DataSource %s/%s\n' "$SOURCE_NAMESPACE" "$SOURCE_NAME"
-# CDI clones cannot be smaller than their source PVC. Preserve an existing
-# installation's root size; on a new installation use the source size.
-SOURCE_PVC_NAMESPACE=$(oc -n "$SOURCE_NAMESPACE" get datasource "$SOURCE_NAME" -o jsonpath='{.status.source.pvc.namespace}')
-SOURCE_PVC_NAME=$(oc -n "$SOURCE_NAMESPACE" get datasource "$SOURCE_NAME" -o jsonpath='{.status.source.pvc.name}')
-[[ -n "$SOURCE_PVC_NAMESPACE" && -n "$SOURCE_PVC_NAME" ]] || { echo 'Ready RHEL DataSource has no PVC source; configure a compatible PVC-backed DataSource.' >&2; exit 1; }
-SOURCE_ROOT_SIZE=$(oc -n "$SOURCE_PVC_NAMESPACE" get pvc "$SOURCE_PVC_NAME" -o jsonpath='{.spec.resources.requests.storage}')
-[[ -n "$SOURCE_ROOT_SIZE" ]] || { echo 'Cannot determine RHEL source PVC size.' >&2; exit 1; }
+# CDI resolves sourceRef for both snapshot-backed and PVC-backed DataSources.
+# Size new roots from the snapshot restore size or source PVC request.
+SOURCE_ROOT_SIZE=$(bash "$DEMO_DIR/scripts/source-root-size.sh" "$SOURCE_NAMESPACE" "$SOURCE_NAME")
 export SOURCE_ROOT_SIZE
 "$AUTOMATION_DIR/scripts/prepare-artifacts.sh"
 if [[ -n ${ANSIBLE_IMAGE+x} ]]; then export ANSIBLE_IMAGE_OVERRIDE=true; fi
@@ -123,4 +119,15 @@ ruby -ryaml -rdigest -e '
 "$DEMO_DIR/bootc/snapshot-class.sh" >/dev/null
 "$DEMO_DIR/modernization/prepare.sh"
 "$DEMO_DIR/bootc/prepare.sh"
+# Optional infrastructure only; the presentation and application tasks stay the same.
+case ${ENABLE_AGENTIC_PREREQS:-auto} in
+  true) ruby "$DEMO_DIR/prereqs/scripts/agentic.rb" --apply ;;
+  auto)
+    if oc get crd olsconfigs.ols.openshift.io >/dev/null 2>&1 && oc get olsconfig cluster >/dev/null 2>&1; then
+      AGENTIC_ALLOW_MISSING_WORKSPACE=true ruby "$DEMO_DIR/prereqs/scripts/agentic.rb" --apply
+    fi
+    ;;
+  false) ;;
+  *) echo 'ENABLE_AGENTIC_PREREQS must be auto, true or false.' >&2; exit 1 ;;
+esac
 printf 'Private setup files: %s\n' "$PRIVATE_DIR"

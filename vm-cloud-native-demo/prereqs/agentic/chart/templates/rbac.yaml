@@ -1,0 +1,59 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rocket-ramen-workspace-agent
+  namespace: {{ .Values.demoNamespace | quote }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, endpoints, persistentvolumeclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services, configmaps]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, deployments/scale]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [route.openshift.io]
+    resources: [routes]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [argoproj.io]
+    resources: [rollouts, rollouts/scale]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [tekton.dev]
+    resources: [pipelines, tasks, pipelineruns, taskruns]
+    verbs: [get, list, watch]
+  - apiGroups: [tekton.dev]
+    resources: [pipelineruns]
+    verbs: [create]
+  - apiGroups: [build.openshift.io]
+    resources: [builds, buildconfigs]
+    verbs: [get, list, watch]
+  - apiGroups: [build.openshift.io]
+    resources: [buildconfigs/instantiate, buildconfigs/instantiatebinary]
+    verbs: [create]
+  - apiGroups: [image.openshift.io]
+    resources: [imagestreams, imagestreamtags]
+    verbs: [get, list, watch]
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines, virtualmachineinstances]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachines/start, virtualmachines/stop, virtualmachines/restart]
+    verbs: [update]
+  - apiGroups: [cdi.kubevirt.io, snapshot.storage.k8s.io]
+    resources: [datavolumes, datasources, volumesnapshots]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rocket-ramen-workspace-agent
+  namespace: {{ .Values.demoNamespace | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-sa" .Values.workspaceId | quote }}
+    namespace: {{ .Values.workspaceNamespace | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rocket-ramen-workspace-agent

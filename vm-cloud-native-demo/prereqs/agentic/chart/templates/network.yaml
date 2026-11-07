@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rocket-ramen-workspace-mcp
+spec:
+  podSelector:
+    matchLabels: {app: openshift-mcp-server}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.workspaceNamespace | quote }}
+          podSelector:
+            matchLabels:
+              controller.devfile.io/devworkspace_id: {{ required "workspaceId required" .Values.workspaceId | quote }}
+      ports: [{protocol: TCP, port: 8443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rocket-ramen-workspace-llm
+spec:
+  podSelector:
+    matchLabels: {app: rocket-ramen-agent-llm}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.workspaceNamespace | quote }}
+          podSelector:
+            matchLabels:
+              controller.devfile.io/devworkspace_id: {{ .Values.workspaceId | quote }}
+      ports: [{protocol: TCP, port: 8443}]

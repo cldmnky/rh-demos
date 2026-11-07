@@ -3,7 +3,7 @@
 set -euo pipefail
 DEMO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 NAMESPACE=${NAMESPACE:-rocket-ramen}
-PRIVATE_DIR=${PRIVATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo"}
+source "$DEMO_DIR/scripts/private-dir.sh"
 SSH_KEY=${SSH_KEY:-"$HOME/.ssh/rh-demos"}
 [[ -f "$SSH_KEY" ]] || SSH_KEY="$PRIVATE_DIR/automation-key"
 SNAPSHOT_CLASS=$("$DEMO_DIR/bootc/snapshot-class.sh")

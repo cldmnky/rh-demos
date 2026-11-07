@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rocket-ramen-agentic-prereqs
+description: Internal LLM access and scoped Kubernetes MCP access for the presenter workspace
+type: application
+version: 0.1.0
