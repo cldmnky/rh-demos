@@ -45,7 +45,16 @@ oc get pipelineruns -n "$NAMESPACE" | grep orders-bootstrap
 
 In Dev Spaces, open `automation/chart/files/ansible/site.yml` and `api.yml`: Tekton provisions the VMs and runs Ansible; Ansible installs packages, configures systemd, and installs the application. The VMs are already on OpenShift: this demonstrates the **post-migration** baseline, not a live hypervisor migration.
 
-**Say:** “We have changed the platform and the operating model. The application itself still looks familiar.”
+**Show GitOps for a VM:** in the Argo CD console open the `rocket-ramen-gitops-vm` Application. Its separate, small `rocket-ramen-gitops-demo` VM comes from `gitops-vm/chart/templates/vm.yaml`. The three application VMs remain managed by Tekton and Ansible. In Dev Spaces, inspect that VM manifest and the Application's source and sync status. To demonstrate self-healing without restarting a VM, change an annotation in a terminal:
+
+```bash
+oc -n "$NAMESPACE" annotate vm rocket-ramen-gitops-demo demo.rocket-ramen.dev/message=changed-live --overwrite
+oc -n "$NAMESPACE" get vm rocket-ramen-gitops-demo -o jsonpath='{.metadata.annotations.demo\.rocket-ramen\.dev/message}{"\n"}'
+```
+
+Refresh Argo CD and the VM annotation until the value returns to `managed-by-gitops` (self-heal is asynchronous). The Argo CD Application's automated sync has self-heal enabled and pruning disabled. This metadata-only change leaves the guest running. The showcase VM is independent of the application and remains after the legacy application VMs are retired.
+
+**Say:** “We have changed the platform and the operating model. VM configuration can live in Git and reconcile through the same platform as our containers. The application itself still looks familiar.”
 
 ## 2. Build and apply from Dev Spaces
 

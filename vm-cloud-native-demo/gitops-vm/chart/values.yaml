@@ -1,0 +1,3 @@
+sourceNamespace: openshift-virtualization-os-images
+sourceName: rhel10
+rootSize: 30Gi

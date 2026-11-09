@@ -32,3 +32,9 @@ DEVSPACE_NAMESPACE="$(oc whoami)-devspaces" ./vm-cloud-native-demo/prereqs/scrip
 ## Optional agent infrastructure
 
 When Lightspeed is already configured, the top-level setup can also prepare scoped Kubernetes MCP access and an internal LLM endpoint for the presenter workspace. See [agent prerequisites](agentic/README.md) for the installer, research findings, cluster changes, verification and a proposed agent-assisted flow. The application and presentation tasks are unchanged.
+
+## VM managed by GitOps
+
+Setup also creates the `rocket-ramen-gitops-vm` Argo CD Application in `openshift-gitops`. It reconciles the independent `rocket-ramen-gitops-demo` VM in the demo namespace from `gitops-vm/chart`; it does not manage the three Ansible-configured application VMs. The VM uses 1 vCPU, 1 GiB memory and a root disk cloned from the selected RHEL DataSource. Setup passes the source and its required disk size to Argo CD. The chart must be published at `PREREQ_GIT_REF` before Argo CD can sync it. Automated self-heal is enabled; pruning is disabled, so removing the manifest from Git does not delete the VM or its disk.
+
+For an existing setup, run `SOURCE_NAMESPACE=openshift-virtualization-os-images SOURCE_NAME=rhel10 SOURCE_ROOT_SIZE=30Gi ./vm-cloud-native-demo/gitops-vm/install.sh` after publishing the chart. Override these values for a different ready DataSource and its restore size. Use `NAMESPACE`, `ARGO_NAMESPACE`, `PREREQ_GIT_URL`, and `PREREQ_GIT_REF` for a different destination or published source. The VM does not configure a login credential or SSH key; it is a reconciliation showcase.

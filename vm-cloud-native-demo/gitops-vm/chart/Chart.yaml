@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rocket-ramen-gitops-vm
+description: Standalone VM for the Rocket Ramen GitOps demonstration
+type: application
+version: 0.1.0

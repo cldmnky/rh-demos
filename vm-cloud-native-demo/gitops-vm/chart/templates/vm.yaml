@@ -1,0 +1,51 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: rocket-ramen-gitops-demo
+  labels:
+    app.kubernetes.io/name: rocket-ramen-gitops-demo
+    app.kubernetes.io/part-of: rocket-ramen-demo
+  annotations:
+    demo.rocket-ramen.dev/message: managed-by-gitops
+spec:
+  runStrategy: Always
+  dataVolumeTemplates:
+    - metadata:
+        name: rocket-ramen-gitops-demo-root
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: {{ .Values.sourceName | quote }}
+          namespace: {{ .Values.sourceNamespace | quote }}
+        storage:
+          resources:
+            requests:
+              storage: {{ .Values.rootSize | quote }}
+  template:
+    metadata:
+      labels:
+        app: rocket-ramen-gitops-demo
+    spec:
+      domain:
+        cpu: {cores: 1}
+        memory: {guest: 1Gi}
+        devices:
+          disks:
+            - name: rootdisk
+              disk: {bus: virtio}
+            - name: cloudinit
+              disk: {bus: virtio}
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume: {name: rocket-ramen-gitops-demo-root}
+        - name: cloudinit
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              hostname: rocket-ramen-gitops-demo

@@ -18,7 +18,7 @@ From this directory, run:
 ./scripts/setup.sh
 ```
 
-The script applies the prerequisite Argo CD applications, prepares a RHEL 10 boot source if needed, builds and stages the application, creates private credentials, runs Tekton and Ansible, stages the container workloads, and prepares the bootc builder and target VM. It waits for the three VMs and checks the application; the final line prints its URL. Allow time for operator installation, image import, VM boot, and package installation.
+The script applies the prerequisite Argo CD applications, prepares a RHEL 10 boot source if needed, builds and stages the application, creates private credentials, applies the Argo CD Application for a separate GitOps showcase VM, runs Tekton and Ansible, stages the container workloads, and prepares the bootc builder and target VM. It waits for the three VMs and checks the application; the final line prints its URL. Allow time for operator installation, image import, VM boot, and package installation.
 
 The default namespace is `rocket-ramen`. Private setup files are kept outside the repository in `${XDG_STATE_HOME:-$HOME/.local/state}/rocket-ramen-demo/<cluster-uid>/<namespace>`; **keep this directory** for repeat runs. The cluster UID comes from the `kube-system` namespace, so a replacement cluster gets fresh state even when its context name is reused. Setup and the bootc migration/reset commands resolve the same directory. Existing VM disks, database contents, and credentials are retained. The script uses `~/.ssh/rh-demos` for automation if it exists, otherwise it generates a separate key in the private directory. To authorize a presenter SSH public key as well, or reuse an earlier private directory:
 

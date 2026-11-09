@@ -82,6 +82,7 @@ printf 'Using RHEL DataSource %s/%s\n' "$SOURCE_NAMESPACE" "$SOURCE_NAME"
 # Size new roots from the snapshot restore size or source PVC request.
 SOURCE_ROOT_SIZE=$(bash "$DEMO_DIR/scripts/source-root-size.sh" "$SOURCE_NAMESPACE" "$SOURCE_NAME")
 export SOURCE_ROOT_SIZE
+"$DEMO_DIR/gitops-vm/install.sh"
 "$AUTOMATION_DIR/scripts/prepare-artifacts.sh"
 if [[ -n ${ANSIBLE_IMAGE+x} ]]; then export ANSIBLE_IMAGE_OVERRIDE=true; fi
 ANSIBLE_IMAGE=${ANSIBLE_IMAGE:-registry.redhat.io/ansible-automation-platform-26/ee-supported-rhel9@sha256:eb29d277b7a7ad59b918ae7635e889599b55b86cad1d84ba8589de66fd48cecd}
