@@ -16,6 +16,11 @@ p '# In the browser: open Rocket Ramen, place an order, and point out the VM bad
 pe 'oc get vm orders-web orders-app orders-db -n "$NAMESPACE"'
 pe 'oc get pipelineruns -n "$NAMESPACE" | grep orders-bootstrap'
 pe 'cat automation/chart/files/ansible/api.yml'
+p '# Show the GitOps VM and its Application in Argo CD; change metadata to demonstrate self-healing.'
+pe 'oc -n openshift-gitops get application rocket-ramen-gitops-vm'
+pe 'oc -n "$NAMESPACE" annotate vm rocket-ramen-gitops-demo demo.rocket-ramen.dev/message=changed-live --overwrite'
+pe 'oc -n "$NAMESPACE" get vm rocket-ramen-gitops-demo -o yaml | grep "demo.rocket-ramen.dev/message"'
+p '# Refresh Argo CD or repeat the last command until Git restores managed-by-gitops.'
 p '# Switch to Dev Spaces: show the source, devfile and Containerfiles.'
 
 act 2 'Build the containers in Dev Spaces'
