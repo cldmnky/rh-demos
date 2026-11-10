@@ -1,157 +1,201 @@
 # Demo runbook: From VMs to cloud-native
 
-**Audience:** developers and DevOps engineers. **Session:** 40 minutes, including slides and questions. The live application is Rocket Ramen: a React/Node.js frontend, a Go API, and MariaDB.
+**Audience:** developers and DevOps engineers. **Application:** Rocket Ramen, a Node.js SPA, a Go API and MariaDB. The live demo starts with all three tiers serving from RHEL VMs and ends with the frontend and API in containers and MariaDB on its original VM.
 
-**Presenter message:** we can modernize how we operate a VM before changing its application. Then we can move application components independently, keeping the database on a VM when that is the right choice.
+**Message:** Modernize the way you operate VMs first; then move application components individually while VMs and containers share the same platform.
 
-| Act | Frontend | API | Database | Audience sees |
-| --- | --- | --- | --- | --- |
-| Start | RHEL VM | RHEL VM | RHEL VM | Familiar application and Ansible-based operations |
-| Containers | Container and VM during Route split | Container, with VM retained | Original VM | Dev Spaces, builds, coexistence and progressive traffic |
-| Target | Container | Container | RHEL bootc VM | Image-managed OS with separate database data |
+| Part | Surface | Show |
+| --- | --- | --- |
+| Operational modernization | OpenShift console and browser | VM application, Lightspeed context, Tekton and Ansible automation |
+| Application modernization | Dev Spaces and OpenShift console | Code, container builds, deployment, Route traffic splitting and Argo Rollouts |
 
-**Implementation status:** the baseline, container cutover, bootc migration and data-preserving reset were rehearsed before the placement display and live Tekton build were added. Rehearse those additions on the restarted cluster. The single setup script prepares container workloads and the bootc target; its fresh build stages and a subsequent uninterrupted repeat setup were tested in an isolated namespace. Guest image update authentication still needs configuration. Legacy VM objects and their disposable root disks are removed after cutover; the separate database disk and snapshots are retained.
+## Before the audience arrives
 
-## Timing and stage setup
+1. Run `./scripts/setup.sh` as described in [README.md](README.md). This also prepares bootc infrastructure, but the live demo does not use it. Allow time for builds and VM provisioning.
+2. Check the `rocket-ramen` project: `orders-web`, `orders-app` and `orders-db` are running; the Route sends all traffic to the web VM; `orders-app` and `orders-db` Services select their respective VMs. The `orders-bootstrap` PipelineRun has succeeded.
+3. Confirm the `orders-build-containers` Pipeline and BuildConfigs exist, the API container Deployment is ready, and the frontend Rollout has two ready replicas. **The containers are pre-staged and running but receive no application traffic at the start.** This keeps a fallback available if the live build takes too long.
+4. Open the application, OpenShift console and [Dev Spaces workspace](prereqs/README.md). Start the workspace in advance and open `vm-cloud-native-demo`. It clones the configured repository revision, so publish the demo changes to that revision before starting it.
+5. Check that OpenShift Lightspeed is available in the console and can answer a read-only question about the `rocket-ramen` project. Its answer depends on configured cluster access and user permissions. See [Lightspeed prerequisites](prereqs/agentic/README.md). Rehearse the question; keep the VM page as a fallback.
+6. In Dev Spaces, open **Terminal: Create New Terminal (Select a Container)** and choose `openshift-cli`. Authenticate to the demo cluster as a user who can start builds, apply workloads and update Services and Routes. Do not display login tokens. The workspace components share source files. Keep the following commands in this terminal for part 2.
+7. Rehearse the live source build and rollout on the target cluster. The VM baseline and earlier cutover were rehearsed, but the newer workspace-source Tekton build needs an end-to-end rehearsal on the current cluster.
 
-| Minutes | Presenter action |
-| --- | --- |
-| 0–4 | Personal VM-to-cloud-native story. Modernization does not start with a rewrite. |
-| 4–10 | OpenShift Virtualization overview and slides: platform, operational and application modernization. |
-| 10–15 | Show Rocket Ramen, three VMs and the Tekton/Ansible baseline. |
-| 15–25 | Dev Spaces: inspect source and Containerfiles, build and deploy the app tiers. |
-| 25–31 | Route traffic to containers with VM rollback available; introduce Argo Rollouts for subsequent container revisions. |
-| 31–36 | Migrate MariaDB to the prepared bootc VM and stop the legacy VMs. |
-| 36–40 | Recap and questions. |
+## Part 1 — Operational modernization: console only
 
-Before the audience arrives:
+### 1. The starting application
 
-1. From this directory, run `./scripts/setup.sh` and check the printed application URL. Keep the generated private setup directory. See [README.md](README.md) for prerequisites, including the RHEL subscription setting.
-2. The setup script runs `./modernization/prepare.sh` to install the namespace-scoped RolloutManager, image streams, build configurations and the live container-build Tekton Pipeline, build both application images, and stage the container workloads. It also sets the GitOps Operator Subscription to namespace-scoped Rollouts mode, a cluster-wide operator setting; it refuses the change if a cluster-scoped RolloutManager exists. This does not change the application Route or the API Service. It allows a slow initial image pull/build to happen before the presentation. Use `NAMESPACE=...` if different from `rocket-ramen`.
-3. If updating an existing baseline, restart the web and API VMs during preparation so the new firmware serial takes effect, then verify `/api/webinfo` and `/api/stats`. A running VM does not acquire a changed firmware serial until restarted. Confirm `oc get vm,deploy,rollout,build -n rocket-ramen`. The three VMs and the container API must be ready; the frontend Rollout must have ready replicas. `oc get rolloutmanager -n rocket-ramen` shows the Rollouts controller resource. If it is not ready, inspect `oc get pods -n rocket-ramen` and the operator before presenting.
-4. The Dev Spaces workspace is prepared through Argo CD: the `vm-cloud-native-devspace` Application applies `prereqs/devspace/devworkspace.yaml` into your Dev Spaces namespace and starts it. Run `./prereqs/scripts/prereqs.sh --apply` as the presenting user and open the printed IDE URL. If the namespace does not exist yet, log in to the Dev Spaces dashboard once, then re-run. The devfile clones the repository branch named by `DEVSPACE_GIT_REF` (default `main`) into `/projects/rh-demos`, so publish presentation changes to that branch first. Open `vm-cloud-native-demo` in the editor and use the `node` and `openshift-cli` terminals; `npm run dev` is served at the workspace's `/vite/` endpoint. Fallback if the Application is unavailable: create a workspace from the [raw devfile on main](https://raw.githubusercontent.com/cldmnky/rh-demos/main/vm-cloud-native-demo/devfile.yaml).
-5. Open the command palette and select **Terminal: Create New Terminal (Select a Container)** to open the `node` and `openshift-cli` container terminals. In the `openshift-cli` terminal, authenticate `oc` to the demo cluster as a user who can start builds and apply Deployments and Rollouts in the demo namespace. Confirm with `oc whoami` and set `NAMESPACE` if it differs from `rocket-ramen`. Do not show login tokens. The live Tekton Pipeline builds the frontend bundle and starts the OpenShift image builds in the cluster. A normal Dev Spaces workspace is not a privileged image builder.
-6. Keep a **local presenter terminal** in this directory, logged in to the correct cluster and using the original private setup directory and SSH key. The bootc migration and reset use those local files and `virtctl`; they are not run from the workspace. The presenter script is `./demo/demo.sh`; it **changes live demo traffic** in act 3. The terminal commands below are alternatives for rehearsing individual steps. Do not run the presentation script as an unattended test.
+**Show:** Open the Rocket Ramen Route in the browser. Place an order and leave it visible. Point out the web and API VM badges, the MariaDB version, and the **Where this page runs** card. The VM names and namespace come from provisioning metadata; a readable VM serial comes from KubeVirt SMBIOS. A guest cannot see its OpenShift node through this mechanism, so the node is shown as `—`.
 
-## 1. The application we inherited
+**In the OpenShift console:** Select project `rocket-ramen` and open **Virtualization → VirtualMachines**. Show `orders-web`, `orders-app` and `orders-db`; the builder, bootc target and separate GitOps showcase VM are infrastructure, not application tiers. Show the `orders` Route and its VM-backed frontend Service.
 
-**Show:** open the Route, place an order, and point out the web VM, API VM and MariaDB badges and the placement details. The VM names and namespace come from Ansible provisioning metadata; when readable, the serial comes from KubeVirt SMBIOS. The guest does not report its OpenShift node, so it is shown as —. Keep the order visible for the later transition.
+**Say:** “The application has already moved onto OpenShift Virtualization. It still runs as three VMs, and we have not rewritten it.”
 
-```bash
-export NAMESPACE=rocket-ramen
-oc get vm orders-web orders-app orders-db -n "$NAMESPACE"
-oc get pipelineruns -n "$NAMESPACE" | grep orders-bootstrap
-```
+### 2. OpenShift Lightspeed understands cluster context
 
-In Dev Spaces, open `automation/chart/files/ansible/site.yml` and `api.yml`: Tekton provisions the VMs and runs Ansible; Ansible installs packages, configures systemd, and installs the application. The VMs are already on OpenShift: this demonstrates the **post-migration** baseline, not a live hypervisor migration.
+Open the **OpenShift Lightspeed** console panel while viewing the `rocket-ramen` project. Ask:
 
-**Show GitOps for a VM:** in the Argo CD console open the `rocket-ramen-gitops-vm` Application. Its separate, small `rocket-ramen-gitops-demo` VM comes from `gitops-vm/chart/templates/vm.yaml`. The three application VMs remain managed by Tekton and Ansible. In Dev Spaces, inspect that VM manifest and the Application's source and sync status. To demonstrate self-healing without restarting a VM, change an annotation in a terminal:
+> What virtual machines are running in the rocket-ramen namespace? Identify the three application VMs and describe their current state.
 
-```bash
-oc -n "$NAMESPACE" annotate vm rocket-ramen-gitops-demo demo.rocket-ramen.dev/message=changed-live --overwrite
-oc -n "$NAMESPACE" get vm rocket-ramen-gitops-demo -o jsonpath='{.metadata.annotations.demo\.rocket-ramen\.dev/message}{"\n"}'
-```
+Review the answer against the VM list. If available, use a follow-up:
 
-Refresh Argo CD and the VM annotation until the value returns to `managed-by-gitops` (self-heal is asynchronous). The Argo CD Application's automated sync has self-heal enabled and pruning disabled. This metadata-only change leaves the guest running. The showcase VM is independent of the application and remains after the legacy application VMs are retired.
+> How is the Rocket Ramen application currently exposed, and which Service does its Route send traffic to?
 
-**Say:** “We have changed the platform and the operating model. VM configuration can live in Git and reconcile through the same platform as our containers. The application itself still looks familiar.”
+**Say:** “Lightspeed can use the cluster context available to my identity. I can check its answer against the live resources in the console.” If Lightspeed is unavailable or does not retrieve the resources, show the VM and Route pages and continue; do not imply a successful live query.
 
-## 2. Build and apply from Dev Spaces
+### 3. Show the VM bootstrap pipeline
 
-**Switch to the Dev Spaces editor.** Show `frontend/Containerfile`, `backend/Containerfile`, `devfile.yaml` and `modernization/workloads.yaml`. The frontend image includes the built SPA, and the API image contains the Go binary.
+In the console, open **Pipelines → Pipelines** in `rocket-ramen`, select **orders-bootstrap**, and show its successful PipelineRun. Follow the tasks:
 
-Make two small changes and save both files:
+1. **Provision:** apply the web, API and database VM definitions and wait for VM readiness. The root disks use the RHEL DataSource; the database has a separate data disk.
+2. **Configure:** run the chart-packaged Ansible playbooks over SSH. Ansible configures MariaDB, the Go API and the Node.js frontend, including their systemd services.
+3. **Verify:** check the application path and the Route.
+
+The Helm chart installs the pipeline, supporting resources, VM definitions and Ansible playbooks; the PipelineRun creates and configures the VMs. VM readiness is followed by guest and application checks. The separate `rocket-ramen-gitops-demo` VM is reconciled by Argo CD and is not one of these three application VMs.
+
+**Transition:** “Now that the VMs are operating on OpenShift, let's modernize the application itself.”
+
+## Part 2 — Application modernization: Dev Spaces and console
+
+All commands below run in the **Dev Spaces `openshift-cli` terminal**. Use the OpenShift console alongside it to visualize builds, workloads and traffic. No presenter script is needed.
+
+### 4. Inspect and change the application
+
+In Dev Spaces, open:
+
+- `frontend/Containerfile`: packages the Node server and built SPA.
+- `backend/Containerfile`: builds and packages the Go API.
+- `modernization/workloads.yaml`: the API Deployment and the frontend Argo Rollout.
+- `modernization/pipeline.yaml`: the Tekton task that builds the frontend bundle and starts the two image builds.
+
+Make two small edits and save them:
 
 1. In `frontend/src/App.tsx`, change `zero-gravity noodle bar · PatternFly 6` to `zero-gravity noodle bar · Mission Control v2`.
-2. In `backend/main.go`, inside `logRequests`, immediately before `start := time.Now()`, add `w.Header().Set("X-Rocket-Ramen-Release", "container-v2")`.
+2. In `backend/main.go`, inside `logRequests`, immediately before `start := time.Now()`, add:
 
-Show the diff in Dev Spaces. These are workspace edits; a Git commit is not required. The running VMs keep the original code. The build packages the current saved source, including these uncommitted edits, using an explicit application-file allowlist.
+   ```go
+   w.Header().Set("X-Rocket-Ramen-Release", "container-v2")
+   ```
 
-In the **`openshift-cli` terminal** in Dev Spaces, use the authenticated session prepared above:
+Show the diff in the editor. These saved workspace edits do not need to be committed for this demo. The running VMs keep their original application artifacts.
+
+### 5. Build with Tekton
+
+In the Dev Spaces CLI terminal:
 
 ```bash
-cd "$PROJECTS_ROOT/rh-demos/vm-cloud-native-demo"
+cd /projects/rh-demos/vm-cloud-native-demo
 export NAMESPACE=rocket-ramen
-./demo/devspaces.sh
+oc whoami
+oc -n "$NAMESPACE" get pipeline orders-build-containers
 ```
 
-The demo-magic segment uploads the saved workspace source to the namespace-local artifact service and starts a Tekton PipelineRun. Tekton verifies its SHA-256, builds the SPA, and starts the API and frontend OpenShift binary builds. The segment displays the workload manifest, resolves the new image digests and visibly runs `oc apply` for the Deployment and frontend Rollout. It then invokes `modernization/deploy.sh` to repeat the idempotent apply and wait for readiness. The API reads the existing database Secret; both containers initially use the existing VM-backed Services. No Route or Service traffic is switched by this apply.
-
-Watch the PipelineRun in the OpenShift Pipelines view or with `oc get pipelineruns -n "$NAMESPACE"`. Builds may take several minutes. Setup has already staged working images and workloads, so if a live build is slow, show the prepared resources and return to the local terminal. The exact workspace code and the presenter segment must be published on the branch cloned by Dev Spaces.
-
-**Say:** “From the development workspace, we build images and apply workloads next to the existing VM application.”
-
-**Return to the local presenter terminal** and continue `./demo/demo.sh` with act 3.
-
-## 3. Shift traffic with a way back
-
-**Local presenter terminal:** continue the demo-magic script. The commands below describe what it executes.
-
-The API Service has one active backend selection at a time. The frontend Route can split incoming connections between the VM Service and container Service. This is the VM-to-container canary; it is independent of Argo Rollouts.
+Start the build with the non-interactive helper:
 
 ```bash
-./modernization/traffic.sh api container
-./modernization/traffic.sh web 50
-oc set route-backends orders -n "$NAMESPACE"
+./modernization/run-pipeline.sh
 ```
 
-Refresh or make new requests to see both frontend runtimes and instance names. The web identity is the instance answering `/api/webinfo`; the API identity comes from `/api/stats`, so separate requests can hit different instances. The Route uses round-robin with router cookies disabled. The weights are relative, apply to new traffic, and are not an exact 50/50 guarantee for a small sample; existing connections, including SSE streams, can stay on their prior backend.
+The helper uploads an allowlisted archive of the **current saved workspace source**, including uncommitted edits, to the namespace-local artifact service and creates a PipelineRun. Tekton verifies the archive checksum, builds the SPA, and starts the backend and frontend OpenShift binary builds. The helper waits for completion; a build can take several minutes.
+
+**In the console:** open **Pipelines → PipelineRuns**, select the new `orders-build-containers` run and show its task and logs. The VM bootstrap PipelineRun is a separate pipeline.
 
 ```bash
-./modernization/traffic.sh web 100
+oc -n "$NAMESPACE" get pipelineruns
+oc -n "$NAMESPACE" get builds
 ```
 
-The app now uses the container frontend and API and the original VM database. Refresh to show the new `Mission Control v2` text, container pod names and node names. Confirm the API code change:
+If the live build fails or runs too long, use the pre-staged images and skip claims that the new text or header has been deployed. Inspect the failed PipelineRun separately; do not start overlapping builds using the same image tags.
+
+### 6. Deploy next to the VMs
+
+After the build succeeds, resolve the two built image digests and apply the workload manifest:
+
+```bash
+API_IMAGE=$(oc -n "$NAMESPACE" get istag/orders-api-container:demo -o jsonpath='{.image.dockerImageReference}')
+WEB_IMAGE=$(oc -n "$NAMESPACE" get istag/orders-web-container:demo -o jsonpath='{.image.dockerImageReference}')
+printf 'API: %s\nWeb: %s\n' "$API_IMAGE" "$WEB_IMAGE"
+```
+
+Check both values end in an `@sha256:` digest, then apply:
+
+```bash
+sed -e "s|DEMO_API_IMAGE|$API_IMAGE|g" -e "s|DEMO_WEB_IMAGE|$WEB_IMAGE|g" modernization/workloads.yaml | oc -n "$NAMESPACE" apply -f -
+oc -n "$NAMESPACE" rollout status deployment/orders-api-container --timeout=5m
+oc -n "$NAMESPACE" get rollout orders-web-container
+oc -n "$NAMESPACE" get pods -l app=orders-web-container
+```
+
+**In the console:** show the API Deployment and frontend Rollout beside the VM resources. Both workloads were staged during setup, so this apply **updates** their images. The web image update itself can initiate the configured 60-second Argo canary; wait until the Rollout is Healthy and both frontend replicas are available before continuing. The API reads the existing database Secret. Applying the workloads does not switch the Route or API Service.
+
+**Say:** “The new container workloads and the existing VMs are running on the same platform. We can now choose when to move traffic.”
+
+### 7. Move traffic and show coexistence
+
+First confirm the VM-backed application and the ready container endpoints:
+
+```bash
+oc -n "$NAMESPACE" get vm orders-web orders-app orders-db
+oc -n "$NAMESPACE" get endpoints orders-web-container
+oc -n "$NAMESPACE" get svc orders-app -o jsonpath='{.spec.selector}{"\n"}'
+oc -n "$NAMESPACE" set route-backends orders
+```
+
+Switch the API Service to the container. This is a selector switch, not a percentage split; both frontend versions use this same API Service:
+
+```bash
+oc -n "$NAMESPACE" patch service orders-app --type=merge -p '{"spec":{"selector":{"vm.kubevirt.io/name":null,"app":"orders-api-container"}}}'
+```
+
+Split the frontend Route between the VM and container Services:
+
+```bash
+oc -n "$NAMESPACE" annotate route orders --overwrite haproxy.router.openshift.io/balance=roundrobin haproxy.router.openshift.io/disable_cookies=true
+oc -n "$NAMESPACE" set route-backends orders orders-web=50 orders-web-container=50
+oc -n "$NAMESPACE" set route-backends orders
+```
+
+**In the console:** show the `orders` Route's two backends and their weights. Refresh the application and compare web runtime and instance names; the API badge now reports a container. The Route weights apply to new connections and are not an exact 50/50 guarantee for a small sample. Existing connections, including SSE, can remain on their previous backend. `/api/webinfo` and the page itself are separate requests and can reach different web instances.
+
+Send all new frontend traffic to the container:
+
+```bash
+oc -n "$NAMESPACE" set route-backends orders orders-web=0 orders-web-container=100
+oc -n "$NAMESPACE" set route-backends orders
+```
+
+Refresh and show the new **Mission Control v2** text and container pod/node information. The API now serves the new code too:
 
 ```bash
 HOST=$(oc -n "$NAMESPACE" get route orders -o jsonpath='{.spec.host}')
 curl -sS -D - -o /dev/null "http://$HOST/api/menu" | grep -i '^x-rocket-ramen-release:'
 ```
 
-The expected header is `X-Rocket-Ramen-Release: container-v2`. If the build was skipped, the staged baseline images do not contain either code change. The legacy frontend and API VMs still run. If either cutover fails, restore in this order:
+The expected header is `X-Rocket-Ramen-Release: container-v2`. The original VMs are still running; MariaDB remains on its original VM. The header and edited text are expected only if the live build succeeded and the new images were applied.
+
+### 8. Progressive delivery of a container revision
+
+The Route split above is controlled directly with `oc`; it is independent of Argo Rollouts. The web container is an Argo `Rollout` with two replicas, a 50% canary step and a 60-second pause. To make a **later container-to-container revision** visible, change an annotation in its pod template:
 
 ```bash
-./modernization/traffic.sh web 0
-./modernization/traffic.sh api vm
-```
-
-**Argo Rollouts:** the frontend container is an Argo `Rollout`. Its first deployment is the initial stable revision; it does not canary the VM. To show a later container-to-container revision, change the pod-template annotation and watch its ReplicaSets during the 60-second pause:
-
-```bash
-oc -n "$NAMESPACE" patch rollout orders-web-container --type=merge -p '{"spec":{"template":{"metadata":{"annotations":{"demo.revision":"2"}}}}}'
+REVISION="$(date +%s)"
+oc -n "$NAMESPACE" patch rollout orders-web-container --type=merge -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"demo.revision\":\"$REVISION\"}}}}}"
 oc -n "$NAMESPACE" get rollout,replicasets,pods -l app=orders-web-container -w
 ```
 
-Stop watching with Ctrl-C. Refresh during the rollout and compare the web pod name with the listed old and new pods. With two replicas, repeated requests can reach different pods, but balancing is not guaranteed to alternate. The example changes an annotation so it demonstrates rollout mechanics without claiming a new application feature. Without a traffic-routing integration, the rollout approximates the canary ratio using replica counts; it does not control the VM-to-container Route split. A repeated demo needs a different annotation value to create a new revision.
+**In the console:** inspect the frontend Rollout and its ReplicaSets and pods during the pause. Refresh the application to compare the displayed web pod name with the old and new pods. Different requests can reach different replicas; strict alternation is not guaranteed. Press Ctrl-C to stop the watch.
 
-## 4. Move MariaDB to a bootc VM
+The annotation changes the pod template to show rollout mechanics; it does not introduce another application feature. Without a configured traffic-routing integration, Argo Rollouts approximates its canary weight using replica counts. It does not control the VM-to-container Route split, and this demo does not configure automated metrics analysis. Workloads here are applied from Dev Spaces; Argo CD is not syncing this Rollout.
 
-Before the demo, prepare and validate the target as described in [bootc/README.md](bootc/README.md). On this cluster, `orders-db-bootc` is already prepared. The builder VM is an additional operational VM, not one of the application tiers. The snapshot class is detected from the database storage class when there is one matching CSI snapshot class. If multiple exist, set it before starting the presenter script:
+## Close and reset
 
-```bash
-export SNAPSHOT_CLASS=ocs-external-storagecluster-rbdplugin-snapclass
-```
+Show the application with container frontend and API, MariaDB on its VM, and the order placed at the beginning. **Say:** “We modernized application components independently, with VMs and containers running side by side. For VM workloads we choose to keep, image mode and bootc offer another way to manage the operating system as an image.” No bootc migration is performed in this demo.
 
-**Local presenter terminal:** continue the demo-magic script and show `bootc/Containerfile`. The image contains the OS and MariaDB; the database files are on a separate disk. The script runs:
+To restore the starting traffic after the presentation, from the Dev Spaces CLI terminal:
 
 ```bash
-./bootc/migrate.sh
-./bootc/status.sh
-./bootc/retire-legacy.sh
+oc -n "$NAMESPACE" set route-backends orders orders-web=100 orders-web-container=0
+oc -n "$NAMESPACE" patch service orders-app --type=merge -p '{"spec":{"selector":{"app":null,"vm.kubevirt.io/name":"orders-app"}}}'
+oc -n "$NAMESPACE" set route-backends orders
+oc -n "$NAMESPACE" get svc orders-app -o jsonpath='{.spec.selector}{"\n"}'
 ```
 
-The migration pauses writes by stopping the API and legacy database, takes an offline CSI snapshot, restores it to a new PVC, attaches it to the target, verifies menu and order counts, and switches the database Service. The frontend and API end on containers. The retirement command removes the three unused legacy VM objects and their VM-owned root disks. The separate database data PVC and snapshots remain available. This has a write outage; it is not a zero-downtime migration.
-
-Show the application and place an order. The old database disk is now stale. Use `./bootc/reset.sh` with `SNAPSHOT_CLASS` set to snapshot the current bootc disk and restore it to a new PVC for the original DB VM, preserving new orders. Each run retains snapshots and old PVCs; inspect and clean them up separately after rehearsals. If any command fails, inspect its output and current VM, Service and PVC state before restarting it. A bootc OS rollback is not a database rollback.
-
-The [image-mode documentation](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html-single/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems) describes bootc and image building.
-
-## 5. Final state and reset
-
-Show `oc get vm,pods,svc`, the browser's container/container/MariaDB stack and the orders. The legacy VM objects and VM-owned root disks have been removed. The separate database data PVC and snapshots are retained. After the presentation, in the local presenter terminal:
-
-```bash
-./bootc/reset.sh
-```
-
-If you want to repeat the exact edit, revert the two presenter changes in the Dev Spaces editor after the session. The reset copies current database data to a new disk, recreates the three legacy VMs, runs Ansible, and restores VM traffic. A full reset was validated with orders created before and after migration. It does not delete old snapshots or PVCs.
+Refresh the application and confirm both web and API report VM and the order is still present. The database has not moved or been reset. To repeat the exact code-edit beat, revert the two presenter edits in Dev Spaces when finished; do not discard unrelated workspace changes. The staged container images and running containers remain available for the next session.
