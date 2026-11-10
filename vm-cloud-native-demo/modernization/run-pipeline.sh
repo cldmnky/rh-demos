@@ -13,7 +13,8 @@ trap 'rm -rf "$staging"' EXIT
 name="container-source-$(basename "$staging" | tr -cd '[:alnum:]').tar.gz"
 archive="$staging/$name"
 # An explicit allowlist avoids uploading .env files, credentials or node_modules.
-COPYFILE_DISABLE=1 tar --format ustar --exclude='.env' --exclude='.env.*' -C "$DEMO_DIR" -czf "$archive" \
+# PAX supports the large arbitrary UIDs assigned to OpenShift containers.
+COPYFILE_DISABLE=1 tar --format pax --exclude='.env' --exclude='.env.*' -C "$DEMO_DIR" -czf "$archive" \
   backend/Containerfile backend/go.mod backend/go.sum backend/main.go backend/store.go backend/hub.go \
   frontend/Containerfile frontend/server.js frontend/index.html frontend/package.json frontend/package-lock.json \
   frontend/tsconfig.json frontend/vite.config.ts frontend/src frontend/public
