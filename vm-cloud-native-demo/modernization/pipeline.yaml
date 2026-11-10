@@ -51,13 +51,14 @@ spec:
     - name: build-frontend-bundle
       image: registry.access.redhat.com/ubi9/nodejs-20:latest
       timeout: 10m
-      workingDir: /work/source/frontend
+      workingDir: /work
       env:
         - {name: HOME, value: /tmp}
         - {name: npm_config_cache, value: /tmp/npm-cache}
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
+        cd /work/source/frontend
         npm ci --no-fund --no-audit
         npm run build
         chmod -R a+rX /work/source/frontend/dist
